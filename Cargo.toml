@@ -5,6 +5,7 @@ edition = "2021"
 description = "Local OpenID mock backend with JWKS, browser login flow, and client_credentials helper"
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/hencjo/niloo"
 
 [dependencies]
 axum = { version = "0.7", features = ["form", "json", "macros"] }
