@@ -1,5 +1,7 @@
 # niloo
 
+> NILOO: niloo is local only openid
+
 `niloo` is a local OpenID mock backend.
 
 It is aimed at local development and test scenarios where you need:
@@ -7,10 +9,6 @@ It is aimed at local development and test scenarios where you need:
 - a browser-based OpenID authorization code flow
 - a JWKS endpoint for JWT validation
 - a simple `client_credentials` client for fetching tokens from Niloo or a real issuer
-
-The name stands for:
-
-> NILOO: niloo is local only openid
 
 ## Features
 
@@ -22,6 +20,8 @@ The name stands for:
 - interactive user chooser for browser flow
 - optional `--sub` to preselect one mock user
 - `client_credentials` mode for fetching remote access tokens and printing them to stdout
+
+## Run with nix
 
 ```bash
 nix run
