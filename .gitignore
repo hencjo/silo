@@ -11,6 +11,3 @@ devenv.local.yaml
 
 # Rust
 target/
-
-# niloo defaults
-.niloo-key.pem

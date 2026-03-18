@@ -168,7 +168,9 @@ subs:
             std::env::temp_dir().join(format!("niloo-remote-config-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(&config_file, yaml).unwrap();
         let args = ServeArgs {
-            keys: KeyArgs { key_file: temp },
+            keys: KeyArgs {
+                key_file: Some(temp),
+            },
             port: addr.port(),
             config_file,
             sub: Some("sub1".to_string()),

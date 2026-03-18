@@ -15,10 +15,12 @@ Precedence:
   --port overrides PORT.
   --config-file is required and CLI-only.
   --sub is optional and CLI-only.
+  --key-file is optional and CLI-only.
 
 Behavior:
   --sub selects one configured user automatically for the browser authorization flow.
   Without --sub, the browser flow shows a user chooser page.
+  Without --key-file, a temporary PEM file is created outside the project directory.
   For client_credentials, client_id must match a configured sub key.
 
 Config file example:
@@ -77,8 +79,8 @@ pub enum Commands {
 
 #[derive(Debug, Clone, Args)]
 pub struct KeyArgs {
-    #[arg(long, default_value = ".niloo-key.pem")]
-    pub key_file: PathBuf,
+    #[arg(long)]
+    pub key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Args)]

@@ -60,7 +60,10 @@ impl ResolvedConfig {
             client_id: CLIENT_ID.to_string(),
             client_secret: CLIENT_SECRET.to_string(),
             scopes_supported: supported_scopes(&users),
-            key_file: args.keys.key_file,
+            key_file: args
+                .keys
+                .key_file
+                .unwrap_or_else(default_ephemeral_key_file),
             selected_sub,
             default_user,
             users,
@@ -119,6 +122,10 @@ subs:
 
 fn default_issuer(port: u16) -> String {
     normalized_issuer(&format!("http://localhost:{port}/Niloo"))
+}
+
+fn default_ephemeral_key_file() -> PathBuf {
+    std::env::temp_dir().join(format!("niloo-{}.pem", uuid::Uuid::new_v4()))
 }
 
 fn normalized_issuer(raw: &str) -> String {

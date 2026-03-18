@@ -401,7 +401,9 @@ subs:
             std::env::temp_dir().join(format!("niloo-config-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(&config_file, yaml).unwrap();
         let args = ServeArgs {
-            keys: KeyArgs { key_file: temp },
+            keys: KeyArgs {
+                key_file: Some(temp),
+            },
             port: 9393,
             config_file,
             sub: selected_sub.map(ToOwned::to_owned),
