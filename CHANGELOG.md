@@ -1,8 +1,6 @@
 # Changelog
 
-## X.Y.Z (unreleased)
-
-### Bug Fixes
+## 0.1.0
 
 ### Improvements
 
