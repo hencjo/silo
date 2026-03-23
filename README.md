@@ -21,10 +21,23 @@ It is aimed at local development and test scenarios where you need:
 - optional `--sub` to preselect one mock user
 - `client_credentials` mode for fetching remote access tokens and printing them to stdout
 
-## Run with nix
+## Install or run with nix
 
 ```bash
-nix run
+nix profile add github:hencjo/niloo
+```
+
+Run niloo directly from the flake without installing it:
+
+```bash
+nix run github:hencjo/niloo -- example-config > config.yaml
+nix run github:hencjo/niloo -- serve --port 9799 --config-file config.yaml &
+```
+
+In another shell:
+```bash
+CLIENT_ID=system-api CLIENT_SECRET=client_secret \
+  nix run github:hencjo/niloo -- client_credentials --issuer-url http://localhost:9799/Niloo
 ```
 
 ## Quick Start
