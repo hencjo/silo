@@ -39,6 +39,9 @@ async fn run_server(args: cli::ServeArgs) -> Result<()> {
     let app = server::build_router(state);
 
     tracing::info!(listen = %config.listen, issuer = %config.issuer, "starting niloo server");
+    if !config.authorization_code_enabled() {
+        eprintln!("authorization_code flow is disabled");
+    }
     if let Some(client) = example_client {
         eprintln!("Run this in a terminal to test:");
         eprintln!(

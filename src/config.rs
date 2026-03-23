@@ -36,7 +36,7 @@ pub struct ResolvedConfig {
     pub scopes_supported: Vec<String>,
     pub key_file: PathBuf,
     pub selected_sub: Option<String>,
-    pub default_authorization_code_user: UserProfile,
+    pub default_authorization_code_user: Option<UserProfile>,
     pub authorization_code_users: BTreeMap<String, UserProfile>,
     pub clients: BTreeMap<String, Client>,
     pub token_ttl_seconds: i64,
@@ -50,21 +50,13 @@ impl ResolvedConfig {
         let parsed = load_config_file(&args.config_file)?;
         let authorization_code_users = parsed.authorization_code_users;
         let selected_sub = args.sub.clone();
-        let default_authorization_code_user = match selected_sub.as_deref() {
-            Some(sub) => authorization_code_users
-                .get(sub)
-                .cloned()
-                .ok_or_else(|| AppError::bad_request(format!("unknown configured sub: {sub}")))?,
-            None => authorization_code_users
-                .values()
-                .next()
-                .cloned()
-                .ok_or_else(|| {
-                    AppError::bad_request(
-                        "config file must define at least one authorization_code sub",
-                    )
-                })?,
-        };
+        let default_authorization_code_user =
+            match selected_sub.as_deref() {
+                Some(sub) => Some(authorization_code_users.get(sub).cloned().ok_or_else(|| {
+                    AppError::bad_request(format!("unknown configured sub: {sub}"))
+                })?),
+                None => authorization_code_users.values().next().cloned(),
+            };
 
         Ok(Self {
             listen: SocketAddr::from(([127, 0, 0, 1], args.port)),
@@ -99,6 +91,10 @@ impl ResolvedConfig {
             .find(|client| client.explicit_client_credentials_profile)
             .or_else(|| self.clients.values().next())
     }
+
+    pub fn authorization_code_enabled(&self) -> bool {
+        !self.authorization_code_users.is_empty()
+    }
 }
 
 pub fn key_id() -> &'static str {
@@ -114,6 +110,7 @@ pub fn example_config_yaml() -> &'static str {
 #   clients maps OAuth client ids to their client_secret and optional client_credentials claims.
 #   All entries under clients are clients, and any client_id may use any flow.
 #   authorization_code.subs defines the selectable users for the browser flow.
+#   Set authorization_code: {} to disable the browser flow entirely.
 #   Each key under claims becomes a claim in the issued JWT.
 #
 clients:
@@ -173,11 +170,13 @@ fn issuer_path(raw: &str) -> Result<String> {
 #[derive(Debug, Deserialize)]
 struct ServeConfigFile {
     clients: BTreeMap<String, ClientConfig>,
+    #[serde(default)]
     authorization_code: AuthorizationCodeConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct AuthorizationCodeConfig {
+    #[serde(default)]
     subs: BTreeMap<String, ServeSubConfig>,
 }
 

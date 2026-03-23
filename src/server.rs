@@ -43,20 +43,26 @@ fn route_path(prefix: &str, suffix: &str) -> String {
 }
 
 async fn discovery(State(state): State<Arc<AppState>>) -> Json<DiscoveryDocument> {
+    let mut grant_types_supported = vec!["client_credentials".to_string()];
+    if state.config.authorization_code_enabled() {
+        grant_types_supported.insert(0, "authorization_code".to_string());
+    }
+
     Json(DiscoveryDocument {
         issuer: state.config.issuer.clone(),
         authorization_endpoint: state.config.authorization_endpoint(),
         token_endpoint: state.config.token_endpoint(),
         jwks_uri: state.config.jwks_uri(),
         scopes_supported: state.config.scopes_supported.clone(),
-        grant_types_supported: vec![
-            "authorization_code".to_string(),
-            "client_credentials".to_string(),
-        ],
+        grant_types_supported,
     })
 }
 
 async fn authorize(State(state): State<Arc<AppState>>, raw_query: RawQuery) -> Result<Response> {
+    if !state.config.authorization_code_enabled() {
+        return Err(AppError::bad_request("authorization_code flow is disabled"));
+    }
+
     let query = AuthorizationQuery::parse(raw_query.0.as_deref())?;
 
     if query.response_type != "code" {
@@ -127,6 +133,10 @@ async fn jwks(State(state): State<Arc<AppState>>) -> Json<crate::keys::Jwks> {
 }
 
 async fn authorization_code_token(state: Arc<AppState>, form: TokenForm) -> Result<Response> {
+    if !state.config.authorization_code_enabled() {
+        return Err(AppError::bad_request("authorization_code flow is disabled"));
+    }
+
     let client_id = required_form_field("client_id", form.client_id)?;
     let client_secret = required_form_field("client_secret", form.client_secret)?;
     let redirect_uri = required_form_field("redirect_uri", form.redirect_uri)?;
@@ -448,6 +458,21 @@ authorization_code:
         crate::server::build_router(Arc::new(AppState::new(config, signing_key)))
     }
 
+    async fn test_app_with_yaml(yaml: &str, selected_sub: Option<&str>) -> axum::Router {
+        let config_file =
+            std::env::temp_dir().join(format!("niloo-config-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(&config_file, yaml).unwrap();
+        let args = ServeArgs {
+            port: 9393,
+            config_file,
+            sub: selected_sub.map(ToOwned::to_owned),
+        };
+
+        let config = ResolvedConfig::from_serve_args(args).unwrap();
+        let signing_key = load_or_create(&config.key_file).await.unwrap();
+        crate::server::build_router(Arc::new(AppState::new(config, signing_key)))
+    }
+
     #[tokio::test]
     async fn serves_root_discovery_document() {
         let app = test_app(None).await;
@@ -480,6 +505,37 @@ authorization_code:
     }
 
     #[tokio::test]
+    async fn omits_authorization_code_from_discovery_when_disabled() {
+        let app = test_app_with_yaml(
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code: {}
+"#,
+            None,
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Niloo/.well-known/openid-configuration")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["grant_types_supported"],
+            serde_json::json!(["client_credentials"])
+        );
+    }
+
+    #[tokio::test]
     async fn presents_user_selection_page_when_no_default_sub_is_configured() {
         let app = test_app(None).await;
         let response = app
@@ -499,6 +555,31 @@ authorization_code:
         assert!(html.contains("Select a user to continue."));
         assert!(html.contains("mock_user=sub1"));
         assert!(html.contains("mock_user=sub2"));
+    }
+
+    #[tokio::test]
+    async fn rejects_authorize_when_authorization_code_is_disabled() {
+        let app = test_app_with_yaml(
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code: {}
+"#,
+            None,
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Niloo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

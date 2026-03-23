@@ -37,13 +37,9 @@ impl AppState {
                 .cloned()
                 .map(Some)
                 .ok_or_else(|| AppError::bad_request(format!("unknown configured sub: {sub}"))),
-            Some(sub) => {
-                let mut user = self.config.default_authorization_code_user.clone();
-                user.sub = sub.to_string();
-                Ok(Some(user))
-            }
+            Some(_) => Ok(None),
             None if !self.config.authorization_code_users.is_empty() => Ok(None),
-            None => Ok(Some(self.config.default_authorization_code_user.clone())),
+            None => Ok(self.config.default_authorization_code_user.clone()),
         }
     }
 

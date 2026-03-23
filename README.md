@@ -52,6 +52,7 @@ The server reads a YAML file with:
 
 - `clients` for OAuth clients and optional `client_credentials` token claims
 - `authorization_code.subs` for selectable browser-flow users
+- `authorization_code: {}` to disable the browser flow entirely
 
 Example:
 
