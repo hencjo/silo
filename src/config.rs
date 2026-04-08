@@ -103,8 +103,8 @@ pub fn key_id() -> &'static str {
 
 pub fn example_config_yaml() -> &'static str {
     "# Example:
-#   niloo example-config > config.yaml
-#   niloo serve --port 9799 --config-file config.yaml
+#   silo example-config > config.yaml
+#   silo serve --port 9799 --config-file config.yaml
 #
 # Structure:
 #   clients maps OAuth client ids to their client_secret and optional client_credentials claims.
@@ -141,11 +141,11 @@ authorization_code:
 }
 
 fn default_issuer(port: u16) -> String {
-    normalized_issuer(&format!("http://localhost:{port}/Niloo"))
+    normalized_issuer(&format!("http://localhost:{port}/Silo"))
 }
 
 fn default_ephemeral_key_file() -> PathBuf {
-    std::env::temp_dir().join(format!("niloo-{}.pem", uuid::Uuid::new_v4()))
+    std::env::temp_dir().join(format!("silo-{}.pem", uuid::Uuid::new_v4()))
 }
 
 fn normalized_issuer(raw: &str) -> String {
@@ -282,7 +282,7 @@ mod tests {
     fn example_config_has_yaml_comments_and_subs() {
         let yaml = example_config_yaml();
         assert!(yaml.starts_with("# Example:"));
-        assert!(yaml.contains("niloo example-config > config.yaml"));
+        assert!(yaml.contains("silo example-config > config.yaml"));
         assert!(yaml.contains("clients:"));
         assert!(yaml.contains("authorization_code:"));
         assert!(yaml.contains("relying-party:"));

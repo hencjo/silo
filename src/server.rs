@@ -377,7 +377,7 @@ fn render_user_selection_page(state: &AppState, raw_query: &str) -> String {
         .join("");
 
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>NILOO: niloo is local only openid</title><style>body{{margin:0;background:#111;color:#f5f5f5;font:16px/1.5 monospace}}main{{max-width:720px;margin:0 auto;padding:32px 20px}}section{{border:1px solid #444;background:#1a1a1a;padding:20px}}h1{{margin:0 0 8px;font-size:28px}}p{{margin:0 0 20px;color:#cfcfcf}}ul{{list-style:none;padding:0;margin:0;border-top:1px solid #333}}li{{border-bottom:1px solid #333}}a{{display:flex;justify-content:space-between;gap:16px;padding:14px 0;color:#fff;text-decoration:none}}a:hover,a:focus{{background:#222;outline:none}}span{{color:#a3a3a3}}</style></head><body><main><section><h1>NILOO: niloo is local only openid</h1><p>Select a user to continue.</p><ul>{items}</ul></section></main><script>const items=[...document.querySelectorAll('a')];if(items.length)items[0].focus();document.addEventListener('keydown',e=>{{if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;const i=Math.max(items.indexOf(document.activeElement),0);const n=e.key==='ArrowDown'?Math.min(i+1,items.length-1):Math.max(i-1,0);items[n]?.focus();e.preventDefault();}});</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>SILO: Silo is local OpenID</title><style>body{{margin:0;background:#111;color:#f5f5f5;font:16px/1.5 monospace}}main{{max-width:720px;margin:0 auto;padding:32px 20px}}section{{border:1px solid #444;background:#1a1a1a;padding:20px}}h1{{margin:0 0 8px;font-size:28px}}p{{margin:0 0 20px;color:#cfcfcf}}ul{{list-style:none;padding:0;margin:0;border-top:1px solid #333}}li{{border-bottom:1px solid #333}}a{{display:flex;justify-content:space-between;gap:16px;padding:14px 0;color:#fff;text-decoration:none}}a:hover,a:focus{{background:#222;outline:none}}span{{color:#a3a3a3}}</style></head><body><main><section><h1>SILO: Silo is local OpenID</h1><p>Select a user to continue.</p><ul>{items}</ul></section></main><script>const items=[...document.querySelectorAll('a')];if(items.length)items[0].focus();document.addEventListener('keydown',e=>{{if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;const i=Math.max(items.indexOf(document.activeElement),0);const n=e.key==='ArrowDown'?Math.min(i+1,items.length-1):Math.max(i-1,0);items[n]?.focus();e.preventDefault();}});</script></body></html>"
     )
 }
 
@@ -445,7 +445,7 @@ authorization_code:
           - auditor
 "#;
         let config_file =
-            std::env::temp_dir().join(format!("niloo-config-{}.yaml", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(&config_file, yaml).unwrap();
         let args = ServeArgs {
             port: 9393,
@@ -460,7 +460,7 @@ authorization_code:
 
     async fn test_app_with_yaml(yaml: &str, selected_sub: Option<&str>) -> axum::Router {
         let config_file =
-            std::env::temp_dir().join(format!("niloo-config-{}.yaml", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(&config_file, yaml).unwrap();
         let args = ServeArgs {
             port: 9393,
@@ -479,7 +479,7 @@ authorization_code:
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/.well-known/openid-configuration")
+                    .uri("/Silo/.well-known/openid-configuration")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -489,10 +489,10 @@ authorization_code:
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["issuer"], "http://localhost:9393/Niloo");
+        assert_eq!(json["issuer"], "http://localhost:9393/Silo");
         assert_eq!(
             json["authorization_endpoint"],
-            "http://localhost:9393/Niloo/oauth2/authorize"
+            "http://localhost:9393/Silo/oauth2/authorize"
         );
         assert_eq!(
             json["scopes_supported"],
@@ -519,7 +519,7 @@ authorization_code: {}
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/.well-known/openid-configuration")
+                    .uri("/Silo/.well-known/openid-configuration")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -541,7 +541,7 @@ authorization_code: {}
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -551,7 +551,7 @@ authorization_code: {}
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("NILOO: niloo is local only openid"));
+        assert!(html.contains("SILO: Silo is local OpenID"));
         assert!(html.contains("Select a user to continue."));
         assert!(html.contains("mock_user=sub1"));
         assert!(html.contains("mock_user=sub2"));
@@ -572,7 +572,7 @@ authorization_code: {}
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -590,7 +590,7 @@ authorization_code: {}
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/Niloo/oauth2/token")
+                    .uri("/Silo/oauth2/token")
                     .header("content-type", "application/x-www-form-urlencoded")
                     .header("authorization", basic_authorization("local-sub2"))
                     .body(Body::from("grant_type=client_credentials"))
@@ -614,7 +614,7 @@ authorization_code: {}
         let jwks = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/jwks.json")
+                    .uri("/Silo/jwks.json")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -631,7 +631,7 @@ authorization_code: {}
 
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&["local-sub2"]);
-        validation.set_issuer(&["http://localhost:9393/Niloo"]);
+        validation.set_issuer(&["http://localhost:9393/Silo"]);
 
         let claims = decode::<serde_json::Value>(access_token, &decoding_key, &validation).unwrap();
         assert_eq!(claims.claims["sub"], "local-sub2");
@@ -646,7 +646,7 @@ authorization_code: {}
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/Niloo/oauth2/token")
+                    .uri("/Silo/oauth2/token")
                     .header("content-type", "application/x-www-form-urlencoded")
                     .body(Body::from("grant_type=client_credentials"))
                     .unwrap(),
@@ -664,7 +664,7 @@ authorization_code: {}
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/Niloo/oauth2/token")
+                    .uri("/Silo/oauth2/token")
                     .header("content-type", "application/x-www-form-urlencoded")
                     .header("authorization", basic_authorization("missing"))
                     .body(Body::from("grant_type=client_credentials"))
@@ -683,7 +683,7 @@ authorization_code: {}
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state&scope=custom_scope&scope=profile&claims=%7B%22id_token%22%3A%7B%22ignored%22%3Anull%7D%7D")
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state&scope=custom_scope&scope=profile&claims=%7B%22id_token%22%3A%7B%22ignored%22%3Anull%7D%7D")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -709,7 +709,7 @@ authorization_code: {}
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/Niloo/oauth2/token")
+                    .uri("/Silo/oauth2/token")
                     .header("content-type", "application/x-www-form-urlencoded")
                     .body(Body::from(format!(
                         "grant_type=authorization_code&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Foauth&client_id=relying-party&client_secret=client_secret&code={code}"
@@ -731,7 +731,7 @@ authorization_code: {}
         let jwks = app
             .oneshot(
                 Request::builder()
-                    .uri("/Niloo/jwks.json")
+                    .uri("/Silo/jwks.json")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -748,7 +748,7 @@ authorization_code: {}
 
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&["relying-party"]);
-        validation.set_issuer(&["http://localhost:9393/Niloo"]);
+        validation.set_issuer(&["http://localhost:9393/Silo"]);
 
         let claims = decode::<serde_json::Value>(id_token, &decoding_key, &validation).unwrap();
         assert_eq!(claims.claims["nonce"], "test-nonce");

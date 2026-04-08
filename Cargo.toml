@@ -1,11 +1,11 @@
 [package]
-name = "niloo"
+name = "silo"
 version = "0.1.0"
 edition = "2021"
 description = "Local OpenID mock backend with JWKS, browser login flow, and client_credentials helper"
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/hencjo/niloo"
+repository = "https://github.com/hencjo/silo"
 
 [dependencies]
 axum = { version = "0.7", features = ["form", "json", "macros"] }

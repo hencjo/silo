@@ -38,14 +38,14 @@ async fn run_server(args: cli::ServeArgs) -> Result<()> {
     let state = Arc::new(AppState::new(config.clone(), signing_key));
     let app = server::build_router(state);
 
-    tracing::info!(listen = %config.listen, issuer = %config.issuer, "starting niloo server");
+    tracing::info!(listen = %config.listen, issuer = %config.issuer, "starting silo server");
     if !config.authorization_code_enabled() {
         eprintln!("authorization_code flow is disabled");
     }
     if let Some(client) = example_client {
         eprintln!("Run this in a terminal to test:");
         eprintln!(
-            "  CLIENT_ID={} CLIENT_SECRET={} niloo client_credentials --issuer-url {}",
+            "  CLIENT_ID={} CLIENT_SECRET={} silo client_credentials --issuer-url {}",
             client.client_id, client.client_secret, config.issuer
         );
     }

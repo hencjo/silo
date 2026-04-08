@@ -1,12 +1,12 @@
 use clap::{Args, Parser, Subcommand};
 
 const ROOT_ABOUT: &str =
-    "NILOO: niloo is local only openid. Local OpenID mock backend with a browser login flow and a remote client_credentials mode.";
+    "SILO: Silo is local OpenID. Local OpenID mock backend with a browser login flow and a remote client_credentials mode.";
 const ROOT_AFTER_HELP: &str = "\
 Examples:
-  niloo serve --port 9799 --config-file config.yaml
-  CLIENT_ID=system-api CLIENT_SECRET=client_secret niloo client_credentials --issuer-url http://localhost:9799/Niloo
-  niloo example-config > config.yaml";
+  silo serve --port 9799 --config-file config.yaml
+  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo
+  silo example-config > config.yaml";
 
 const SERVE_AFTER_HELP: &str = "\
 Precedence:
@@ -51,15 +51,15 @@ Environment:
   ISSUER_URL and CLIENT_ID can come from env or be overridden by CLI options.
   CLIENT_SECRET is read from the environment only.
 
-Niloo serve mode:
+Silo serve mode:
   client_id must match a configured client.
 
 Example:
-  CLIENT_ID=system-api CLIENT_SECRET=client_secret niloo client_credentials --issuer-url http://localhost:9799/Niloo";
+  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo";
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "niloo",
+    name = "silo",
     version,
     about = ROOT_ABOUT,
     long_about = ROOT_ABOUT,

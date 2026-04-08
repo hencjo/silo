@@ -1,5 +1,5 @@
 {
-  description = "NILOO: niloo is local only openid";
+  description = "SILO: Silo is local OpenID";
 
   inputs = {
     nixpkgs.url = "github:cachix/devenv-nixpkgs/rolling";
@@ -29,26 +29,26 @@
       packages = forAllSystems (
         { pkgs, ... }:
         let
-          niloo = pkgs.rustPlatform.buildRustPackage {
-            pname = "niloo";
+          silo = pkgs.rustPlatform.buildRustPackage {
+            pname = "silo";
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
           };
         in
         {
-          inherit niloo;
-          default = niloo;
+          inherit silo;
+          default = silo;
         }
       );
 
       apps = forAllSystems (
         { system, ... }:
         let
-          program = "${self.packages.${system}.niloo}/bin/niloo";
+          program = "${self.packages.${system}.silo}/bin/silo";
         in
         {
-          niloo = {
+          silo = {
             type = "app";
             inherit program;
           };

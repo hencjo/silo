@@ -6,7 +6,11 @@
 
 ### Improvements
 
+- Renamed niloo to Silo across the binary, package metadata, docs, and user-facing text.
+
 ### Breaking Changes
+
+- **Rename**: Changed the CLI binary/package name from `niloo` to `silo`, updated the default issuer path from `/Niloo` to `/Silo`, and switched examples and metadata to the new name.
 
 ## 0.1.0
 

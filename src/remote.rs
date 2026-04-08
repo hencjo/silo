@@ -174,7 +174,7 @@ authorization_code:
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let config_file =
-            std::env::temp_dir().join(format!("niloo-remote-config-{}.yaml", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("silo-remote-config-{}.yaml", uuid::Uuid::new_v4()));
         std::fs::write(&config_file, yaml).unwrap();
         let args = ServeArgs {
             port: addr.port(),
@@ -188,7 +188,7 @@ authorization_code:
         let handle = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        (handle, format!("http://localhost:{}/Niloo", addr.port()))
+        (handle, format!("http://localhost:{}/Silo", addr.port()))
     }
 
     #[tokio::test]

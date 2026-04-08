@@ -17,13 +17,13 @@ Prefix commands with `devenv shell --` to run them directly.
 
 ## Architecture Overview
 
-niloo is a local OpenID mock backend.
+silo is a local OpenID mock backend.
 
 It is aimed at local development and test scenarios where you need:
 
 - a browser-based OpenID authorization code flow
 - a JWKS endpoint for JWT validation
-- a simple `client_credentials` client for fetching tokens from Niloo or a real issuer
+- a simple `client_credentials` client for fetching tokens from Silo or a real issuer
 
 It's built and consumed as a nix flake (`flake.nix`, `flake.lock`).
 
@@ -37,7 +37,7 @@ It's built and consumed as a nix flake (`flake.nix`, `flake.lock`).
 
 ### Bug Fixes
 
-- Fixed <description> ([#<issue>](https://github.com/hencjo/niloo/issues/<issue>)).
+- Fixed <description> ([#<issue>](https://github.com/hencjo/silo/issues/<issue>)).
 
 ### Improvements
 
