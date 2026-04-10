@@ -17,7 +17,7 @@ pub struct UserProfile {
     pub sub: String,
     pub given_name: String,
     pub name: String,
-    pub additional_claims: BTreeMap<String, Vec<String>>,
+    pub additional_claims: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,7 +187,7 @@ struct ServeSubConfig {
     #[serde(rename = "defaultName")]
     name: String,
     #[serde(default)]
-    claims: BTreeMap<String, Vec<String>>,
+    claims: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,7 +199,7 @@ struct ClientConfig {
     #[serde(rename = "defaultName")]
     name: Option<String>,
     #[serde(default)]
-    claims: BTreeMap<String, Vec<String>>,
+    claims: BTreeMap<String, serde_json::Value>,
 }
 
 struct ParsedConfigFile {
@@ -277,6 +277,7 @@ fn default_client_secret() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn example_config_has_yaml_comments_and_subs() {
@@ -287,5 +288,46 @@ mod tests {
         assert!(yaml.contains("authorization_code:"));
         assert!(yaml.contains("relying-party:"));
         assert!(yaml.contains("system-api:"));
+    }
+
+    #[test]
+    fn parses_arbitrary_claim_values() {
+        let path = std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code:
+  subs:
+    sub1:
+      givenName: Mock
+      defaultName: Mock User
+      claims:
+        app00001418_groups:
+          - APP00001418_sudo_all
+          - APP00001418_ssh_all
+        email: henrik.sjostrand@tele2.com
+        enabled: true
+        level: 7
+"#,
+        )
+        .unwrap();
+
+        let parsed = load_config_file(&path).unwrap();
+        let user = parsed.authorization_code_users.get("sub1").unwrap();
+        assert_eq!(
+            user.additional_claims.get("app00001418_groups"),
+            Some(&json!(["APP00001418_sudo_all", "APP00001418_ssh_all"]))
+        );
+        assert_eq!(
+            user.additional_claims.get("email"),
+            Some(&json!("henrik.sjostrand@tele2.com"))
+        );
+        assert_eq!(user.additional_claims.get("enabled"), Some(&json!(true)));
+        assert_eq!(user.additional_claims.get("level"), Some(&json!(7)));
+
+        let _ = std::fs::remove_file(path);
     }
 }

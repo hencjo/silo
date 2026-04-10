@@ -100,12 +100,13 @@ authorization_code:
       claims:
         groups:
           - auditor
+        email: admin@example.com
 ```
 
 Notes:
 
 - `givenName` and `defaultName` are emitted in the ID token.
-- Each key under `claims` becomes a claim in issued JWTs.
+- Each key under `claims` becomes a claim in issued JWTs, with the original YAML value preserved.
 - All entries under `clients` are OAuth clients, and any configured client can use either flow.
 - For `client_credentials`, `givenName`, `defaultName`, and `claims` are optional per client. If omitted, Silo still mints a valid token with `sub=<client_id>`.
 

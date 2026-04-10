@@ -59,22 +59,7 @@ pub fn mint_token_bundle(
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(signing_key.key_id.clone());
 
-    let extra = user
-        .additional_claims
-        .iter()
-        .map(|(key, values)| {
-            (
-                key.clone(),
-                serde_json::Value::Array(
-                    values
-                        .iter()
-                        .cloned()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
-            )
-        })
-        .collect();
+    let extra = user.additional_claims.clone();
 
     let claims = Claims {
         nonce: nonce.map(ToOwned::to_owned),
@@ -131,22 +116,7 @@ pub fn mint_system_access_token(
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(signing_key.key_id.clone());
 
-    let extra = user
-        .additional_claims
-        .iter()
-        .map(|(key, values)| {
-            (
-                key.clone(),
-                serde_json::Value::Array(
-                    values
-                        .iter()
-                        .cloned()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
-            )
-        })
-        .collect();
+    let extra = user.additional_claims.clone();
 
     let claims = AccessTokenClaims {
         iss: config.issuer.clone(),

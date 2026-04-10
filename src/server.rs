@@ -443,6 +443,7 @@ authorization_code:
       claims:
         groups:
           - auditor
+        email: admin@example.com
 "#;
         let config_file =
             std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
@@ -496,7 +497,7 @@ authorization_code:
         );
         assert_eq!(
             json["scopes_supported"],
-            serde_json::json!(["groups", "openid", "profile"])
+            serde_json::json!(["email", "groups", "openid", "profile"])
         );
         assert_eq!(
             json["grant_types_supported"],
@@ -754,6 +755,7 @@ authorization_code: {}
         assert_eq!(claims.claims["nonce"], "test-nonce");
         assert_eq!(claims.claims["sub"], "sub2");
         assert_eq!(claims.claims["groups"][0], "auditor");
+        assert_eq!(claims.claims["email"], "admin@example.com");
     }
 
     fn basic_authorization(client_id: &str) -> String {

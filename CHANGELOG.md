@@ -6,6 +6,8 @@
 
 ### Improvements
 
+- Preserved arbitrary claim values from config in issued JWTs, so `authorization_code` users can now emit scalar claims like `email` as well as arrays, booleans, numbers, and objects.
+
 ### Breaking Changes
 
 ## 1.0.0
