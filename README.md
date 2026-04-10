@@ -10,6 +10,12 @@ It is aimed at local development and test scenarios where you need:
 - a JWKS endpoint for JWT validation
 - a simple `client_credentials` client for fetching tokens from Silo or a real issuer
 
+## Browser flow
+
+The browser-based authorization flow includes a built-in user picker:
+
+![Silo user picker](./docs/screenshots/user-picker.png)
+
 ## Features
 
 - OpenID discovery at `/Silo/.well-known/openid-configuration`
