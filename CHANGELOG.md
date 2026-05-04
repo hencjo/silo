@@ -1,8 +1,18 @@
 # Changelog
 
-## X.Y.Z (unreleased)
+## 1.0.0
 
 ### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
+## 1.0.1
+
+### Bug Fixes
+
+- Kept the browser user picker in the same order as `authorization_code.subs` in the config file.
 
 ### Improvements
 
