@@ -33,7 +33,8 @@ impl AppState {
             Some(sub) if !self.config.authorization_code_users.is_empty() => self
                 .config
                 .authorization_code_users
-                .get(sub)
+                .iter()
+                .find(|user| user.sub == sub)
                 .cloned()
                 .map(Some)
                 .ok_or_else(|| AppError::bad_request(format!("unknown configured sub: {sub}"))),
@@ -44,7 +45,7 @@ impl AppState {
     }
 
     pub fn available_users(&self) -> impl Iterator<Item = &UserProfile> {
-        self.config.authorization_code_users.values()
+        self.config.authorization_code_users.iter()
     }
 
     pub fn authorization_path(&self) -> String {

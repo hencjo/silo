@@ -37,7 +37,7 @@ pub struct ResolvedConfig {
     pub key_file: PathBuf,
     pub selected_sub: Option<String>,
     pub default_authorization_code_user: Option<UserProfile>,
-    pub authorization_code_users: BTreeMap<String, UserProfile>,
+    pub authorization_code_users: Vec<UserProfile>,
     pub clients: BTreeMap<String, Client>,
     pub token_ttl_seconds: i64,
     pub code_ttl_seconds: i64,
@@ -50,13 +50,18 @@ impl ResolvedConfig {
         let parsed = load_config_file(&args.config_file)?;
         let authorization_code_users = parsed.authorization_code_users;
         let selected_sub = args.sub.clone();
-        let default_authorization_code_user =
-            match selected_sub.as_deref() {
-                Some(sub) => Some(authorization_code_users.get(sub).cloned().ok_or_else(|| {
-                    AppError::bad_request(format!("unknown configured sub: {sub}"))
-                })?),
-                None => authorization_code_users.values().next().cloned(),
-            };
+        let default_authorization_code_user = match selected_sub.as_deref() {
+            Some(sub) => Some(
+                authorization_code_users
+                    .iter()
+                    .find(|user| user.sub == sub)
+                    .cloned()
+                    .ok_or_else(|| {
+                        AppError::bad_request(format!("unknown configured sub: {sub}"))
+                    })?,
+            ),
+            None => authorization_code_users.first().cloned(),
+        };
 
         Ok(Self {
             listen: SocketAddr::from(([127, 0, 0, 1], args.port)),
@@ -177,7 +182,7 @@ struct ServeConfigFile {
 #[derive(Debug, Default, Deserialize)]
 struct AuthorizationCodeConfig {
     #[serde(default)]
-    subs: BTreeMap<String, ServeSubConfig>,
+    subs: serde_yaml::Mapping,
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,25 +208,28 @@ struct ClientConfig {
 }
 
 struct ParsedConfigFile {
-    authorization_code_users: BTreeMap<String, UserProfile>,
+    authorization_code_users: Vec<UserProfile>,
     clients: BTreeMap<String, Client>,
 }
 
 fn load_config_file(path: &Path) -> Result<ParsedConfigFile> {
     let raw = std::fs::read_to_string(path)?;
     let parsed: ServeConfigFile = serde_yaml::from_str(&raw)?;
-    let mut authorization_code_users = BTreeMap::new();
+    let mut authorization_code_users = Vec::new();
 
     for (sub, entry) in parsed.authorization_code.subs {
-        authorization_code_users.insert(
-            sub.clone(),
-            UserProfile {
-                sub,
-                given_name: entry.given_name,
-                name: entry.name,
-                additional_claims: entry.claims,
-            },
-        );
+        let Some(sub) = sub.as_str() else {
+            return Err(AppError::bad_request(
+                "authorization_code.subs keys must be strings",
+            ));
+        };
+        let entry: ServeSubConfig = serde_yaml::from_value(entry)?;
+        authorization_code_users.push(UserProfile {
+            sub: sub.to_string(),
+            given_name: entry.given_name,
+            name: entry.name,
+            additional_claims: entry.claims,
+        });
     }
 
     let mut clients = BTreeMap::new();
@@ -253,11 +261,11 @@ fn load_config_file(path: &Path) -> Result<ParsedConfigFile> {
 }
 
 fn supported_scopes(
-    authorization_code_users: &BTreeMap<String, UserProfile>,
+    authorization_code_users: &[UserProfile],
     clients: &BTreeMap<String, Client>,
 ) -> Vec<String> {
     let mut scopes = BTreeSet::from(["openid".to_string(), "profile".to_string()]);
-    for user in authorization_code_users.values() {
+    for user in authorization_code_users {
         for scope in user.additional_claims.keys() {
             scopes.insert(scope.clone());
         }
@@ -316,7 +324,11 @@ authorization_code:
         .unwrap();
 
         let parsed = load_config_file(&path).unwrap();
-        let user = parsed.authorization_code_users.get("sub1").unwrap();
+        let user = parsed
+            .authorization_code_users
+            .iter()
+            .find(|user| user.sub == "sub1")
+            .unwrap();
         assert_eq!(
             user.additional_claims.get("app00001418_groups"),
             Some(&json!(["APP00001418_sudo_all", "APP00001418_ssh_all"]))
@@ -327,6 +339,41 @@ authorization_code:
         );
         assert_eq!(user.additional_claims.get("enabled"), Some(&json!(true)));
         assert_eq!(user.additional_claims.get("level"), Some(&json!(7)));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn preserves_authorization_code_sub_order_from_config() {
+        let path = std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code:
+  subs:
+    zed:
+      givenName: Zed
+      defaultName: Zed User
+    alpha:
+      givenName: Alpha
+      defaultName: Alpha User
+    middle:
+      givenName: Middle
+      defaultName: Middle User
+"#,
+        )
+        .unwrap();
+
+        let parsed = load_config_file(&path).unwrap();
+        let subs: Vec<_> = parsed
+            .authorization_code_users
+            .iter()
+            .map(|user| user.sub.as_str())
+            .collect();
+        assert_eq!(subs, ["zed", "alpha", "middle"]);
 
         let _ = std::fs::remove_file(path);
     }

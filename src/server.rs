@@ -559,6 +559,48 @@ authorization_code: {}
     }
 
     #[tokio::test]
+    async fn presents_user_selection_page_in_config_order() {
+        let app = test_app_with_yaml(
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code:
+  subs:
+    zed:
+      givenName: Zed
+      defaultName: Zed User
+    alpha:
+      givenName: Alpha
+      defaultName: Alpha User
+    middle:
+      givenName: Middle
+      defaultName: Middle User
+"#,
+            None,
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        let zed = html.find("mock_user=zed").unwrap();
+        let alpha = html.find("mock_user=alpha").unwrap();
+        let middle = html.find("mock_user=middle").unwrap();
+        assert!(zed < alpha);
+        assert!(alpha < middle);
+    }
+
+    #[tokio::test]
     async fn rejects_authorize_when_authorization_code_is_disabled() {
         let app = test_app_with_yaml(
             r#"
