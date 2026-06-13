@@ -9,6 +9,7 @@
 {
   packages = with pkgs; [
     git
+    release-plz
   ];
 
   git-hooks.hooks = {

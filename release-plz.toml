@@ -1,0 +1,75 @@
+[workspace]
+# Silo is released from git tags/GitHub releases, not crates.io.
+git_only = true
+publish = false
+
+# Release the current Cargo.toml version when no matching release tag exists; later releases come from release-plz PRs.
+release_always = true
+
+# Use package-prefixed tags for release-plz. The legacy bare 1.0.x tags had stale Cargo versions.
+git_tag_enable = true
+git_tag_name = "{{ package }}-v{{ version }}"
+git_release_enable = true
+git_release_name = "{{ package }}-v{{ version }}"
+git_release_body = "{{ changelog }}"
+
+# Keep the release PR focused on the files we care about.
+changelog_update = true
+dependencies_update = false
+pr_branch_prefix = "release-plz-"
+pr_labels = ["release"]
+repo_url = "https://github.com/hencjo/silo"
+semver_check = false
+
+[changelog]
+header = """# Changelog
+
+## Unreleased
+
+### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
+"""
+body = """
+## {{ version }}
+{% set bug_fixes = commits | filter(attribute="group", value="Bug Fixes") %}
+{% set improvements = commits | filter(attribute="group", value="Improvements") %}
+{% set breaking_changes = commits | filter(attribute="group", value="Breaking Changes") %}
+{% if bug_fixes %}
+### Bug Fixes
+{% for commit in bug_fixes %}
+- {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+{% endfor %}
+{% endif %}
+{% if improvements %}
+### Improvements
+{% for commit in improvements %}
+- {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+{% endfor %}
+{% endif %}
+{% if breaking_changes %}
+### Breaking Changes
+{% for commit in breaking_changes %}
+- **Breaking**: {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+{% endfor %}
+{% endif %}
+"""
+trim = true
+protect_breaking_commits = true
+sort_commits = "oldest"
+commit_preprocessors = [
+  { pattern = "\\(#([0-9]+)\\)", replace = "([#${1}](https://github.com/hencjo/silo/pull/${1}))" },
+]
+commit_parsers = [
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^[Bb]ug", group = "Bug Fixes" },
+  { message = "^feat", group = "Improvements" },
+  { message = "^[Ii]mprovement", group = "Improvements" },
+  { message = "^[Aa]dd", group = "Improvements" },
+  { message = "^[Bb]reak", group = "Breaking Changes" },
+  { body = "BREAKING CHANGE", group = "Breaking Changes" },
+  { message = "^.*", group = "Improvements" },
+]

@@ -8,6 +8,7 @@
   outputs =
     { self, nixpkgs }:
     let
+      cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -30,8 +31,8 @@
         { pkgs, ... }:
         let
           silo = pkgs.rustPlatform.buildRustPackage {
-            pname = "silo";
-            version = "0.1.0";
+            pname = cargoToml.package.name;
+            version = cargoToml.package.version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
           };

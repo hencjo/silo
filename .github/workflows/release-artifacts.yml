@@ -1,0 +1,118 @@
+name: Release artifacts
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to package, for example silo-v1.0.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64-static:
+    name: Linux x86_64 static tarball
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'hencjo' }}
+    env:
+      PACKAGE: silo
+      TARGET: x86_64-unknown-linux-musl
+      PLATFORM: linux-x86_64-static
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${{ github.event.release.tag_name }}"
+          fi
+
+          case "$tag" in
+            silo-v*) version="${tag#silo-v}" ;;
+            *) echo "::error::Expected a tag like silo-v1.0.1, got '$tag'"; exit 1 ;;
+          esac
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$tag' does not contain a valid semver-ish version"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=${PACKAGE}-${version}-${PLATFORM}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes musl-tools
+
+      - name: Build static binary
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="${{ steps.release.outputs.archive }}"
+          mkdir -p "dist/$archive"
+
+          cp "target/$TARGET/release/$PACKAGE" "dist/$archive/$PACKAGE"
+          cp LICENSE README.md "dist/$archive/"
+
+          tar \
+            --create \
+            --gzip \
+            --file "dist/$archive.tar.gz" \
+            --directory dist \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            "$archive"
+
+          (
+            cd dist
+            sha256sum "$archive.tar.gz" > "$archive.tar.gz.sha256"
+          )
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.archive }}
+          if-no-files-found: error
+          path: |
+            dist/${{ steps.release.outputs.archive }}.tar.gz
+            dist/${{ steps.release.outputs.archive }}.tar.gz.sha256
+
+      - name: Upload GitHub release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload \
+            "${{ steps.release.outputs.tag }}" \
+            "dist/${{ steps.release.outputs.archive }}.tar.gz" \
+            "dist/${{ steps.release.outputs.archive }}.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
