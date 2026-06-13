@@ -2,6 +2,16 @@
 
 Releases are handled by `release-plz` through GitHub Actions.
 
+## One-time GitHub setup
+
+Do this before trusting the release workflow:
+
+1. Go to **Settings → Actions → General**.
+2. Under **Workflow permissions**, choose **Read and write permissions**.
+3. Enable **Allow GitHub Actions to create and approve pull requests**.
+4. Go to **Settings → Actions → Workflow permissions** if GitHub shows the setting there instead; GitHub likes moving things around.
+5. No crates.io token is needed. If a workflow asks for one, the config is wrong.
+
 ## Normal release
 
 1. Merge feature/fix PRs into `master`.
@@ -23,7 +33,7 @@ Releases are handled by `release-plz` through GitHub Actions.
    - a tag named `silo-vX.Y.Z`
    - a GitHub Release named `silo-vX.Y.Z`
    - release notes copied from that version's changelog section
-8. Wait for the **Release artifacts** workflow.
+8. Wait for the **Release artifacts** job in the same workflow.
 9. Confirm the release has:
    - `silo-X.Y.Z-linux-x86_64-static.tar.gz`
    - `silo-X.Y.Z-linux-x86_64-static.tar.gz.sha256`
@@ -68,7 +78,8 @@ If `gh` is not installed, check the Releases page on GitHub instead.
 - New release tags use `silo-vX.Y.Z`.
 - Old bare tags like `1.0.1` exist, but release-plz intentionally ignores them because the old tags were made before `Cargo.toml` versions were kept in sync.
 - `CHANGELOG.md` should always keep an empty `Unreleased` section at the top for the next cycle.
-- Binary artifacts are built separately by `.github/workflows/release-artifacts.yml`. If GitHub suppresses that workflow after a release made with `GITHUB_TOKEN`, run it manually:
+- Binary artifacts are built by the `Release artifacts` job in `.github/workflows/release-plz.yml`.
+- `.github/workflows/release-artifacts.yml` also exists as a manual fallback. Use it if assets are missing:
 
   ```sh
   gh workflow run release-artifacts.yml -f tag=silo-vX.Y.Z

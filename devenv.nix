@@ -9,6 +9,7 @@
 {
   packages = with pkgs; [
     git
+    gh
     release-plz
   ];
 
