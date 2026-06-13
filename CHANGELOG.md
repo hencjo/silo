@@ -1,5 +1,72 @@
 # Changelog
 
+### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
+## 1.0.1
+
+
+
+
+### Bug Fixes
+
+- Kept the browser user picker in the same order as `authorization_code.subs` in the config file..
+
+
+
+### Improvements
+
+- Clean git history..
+
+- Readme.
+
+- README.
+
+- README.
+
+- License.
+
+- Readme.
+
+- Added repository.
+
+- Devenv 2.x.
+
+- Make .pem-keyfile ephemeral. No need to store between sessions..
+
+- New config layout with clients and authorization_code separate..
+
+- Removed --key-file arg..
+
+- AGENTS.md.
+
+- Added explicit support for disabling the browser flow with `authorization_code: {}`.
+
+- Changelog.
+
+- Changelog.
+
+- Better examples in README.md.
+
+- Renamed project..
+
+- Changelog.
+
+- Changelog.
+
+- Screenshot..
+
+- Preserved arbitrary claim values from config in issued JWTs, so `authorization_code` users can now emit scalar claims like `email` as well as arrays, booleans, numbers, and objects..
+
+- Changelog prepare..
+
+- Test release.
+
+
+
 ## 1.0.0
 
 ### Bug Fixes
