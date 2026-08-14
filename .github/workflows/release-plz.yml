@@ -25,34 +25,21 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz release
+        id: release_plz
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Detect release for this commit
+      - name: Select release for artifact build
         id: released
+        if: ${{ steps.release_plz.outputs.releases_created == 'true' }}
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
           tag="silo-v$version"
-
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "No GitHub release named $tag exists; skipping artifact build."
-            exit 0
-          fi
-
-          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
-
-          if [[ "$(git rev-list -n1 "$tag")" != "$(git rev-parse HEAD)" ]]; then
-            echo "Release $tag does not point at this commit; skipping artifact build."
-            exit 0
-          fi
-
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   release-artifacts:
