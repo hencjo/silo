@@ -1,5 +1,28 @@
 # Changelog
 
+### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
+## 1.0.2
+
+
+
+
+### Bug Fixes
+
+- Improve remote token error diagnostics.
+
+
+
+### Improvements
+
+- Gh in pkgs.
+
+
+
 ## 1.0.0
 
 ### Bug Fixes
