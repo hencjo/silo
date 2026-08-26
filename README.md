@@ -16,12 +16,16 @@ The browser-based authorization flow includes a built-in user picker:
 
 ![Silo user picker](./docs/screenshots/user-picker.png)
 
+The code exchange returns signed ID and access tokens. Silo does not issue refresh tokens.
+
 ## Features
 
 - OpenID discovery at `/Silo/.well-known/openid-configuration`
 - authorization endpoint at `/Silo/oauth2/authorize`
 - token endpoint at `/Silo/oauth2/token`
 - JWKS at `/Silo/jwks.json`
+- RS256 ID tokens and access tokens for the authorization-code flow
+- standard OAuth error redirects for valid clients and redirect URLs
 - configurable mock users from YAML
 - interactive user chooser for browser flow
 - optional `--sub` to preselect one mock user

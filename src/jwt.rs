@@ -4,7 +4,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use jsonwebtoken::{Algorithm, Header};
-use rand::distributions::{Alphanumeric, DistString};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -17,7 +16,7 @@ use crate::oidc::{AccessTokenResponse, TokenResponse};
 pub struct TokenBundle {
     pub id_token: String,
     pub access_token: String,
-    pub refresh_token: String,
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +34,6 @@ struct Claims {
     iat: u64,
     exp: u64,
     at_hash: String,
-    rt_hash: String,
     sub: String,
     given_name: String,
     name: String,
@@ -49,9 +47,8 @@ pub fn mint_token_bundle(
     user: &UserProfile,
     client_id: &str,
     nonce: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<TokenBundle> {
-    let access_token = format!("at-{}", random_token());
-    let refresh_token = format!("rt-{}", random_token());
     let now = SystemTime::now();
     let iat = unix_timestamp(now)?;
     let exp = unix_timestamp(now + Duration::from_secs(config.token_ttl_seconds.max(1) as u64))?;
@@ -60,6 +57,20 @@ pub fn mint_token_bundle(
     header.kid = Some(signing_key.key_id.clone());
 
     let extra = user.additional_claims.clone();
+    let access_token_claims = AccessTokenClaims {
+        iss: config.issuer.clone(),
+        aud: client_id.to_string(),
+        iat,
+        exp,
+        sub: user.sub.clone(),
+        azp: Some(client_id.to_string()),
+        scope: scope.map(ToOwned::to_owned),
+        given_name: Some(user.given_name.clone()),
+        name: Some(user.name.clone()),
+        extra: extra.clone(),
+    };
+    let access_token =
+        jsonwebtoken::encode(&header, &access_token_claims, &signing_key.encoding_key)?;
 
     let claims = Claims {
         nonce: nonce.map(ToOwned::to_owned),
@@ -68,7 +79,6 @@ pub fn mint_token_bundle(
         iat,
         exp,
         at_hash: token_hash(&access_token),
-        rt_hash: token_hash(&refresh_token),
         sub: user.sub.clone(),
         given_name: user.given_name.clone(),
         name: user.name.clone(),
@@ -79,7 +89,7 @@ pub fn mint_token_bundle(
     Ok(TokenBundle {
         id_token,
         access_token,
-        refresh_token,
+        scope: scope.map(ToOwned::to_owned),
     })
 }
 
@@ -87,7 +97,7 @@ pub fn into_token_response(bundle: TokenBundle) -> TokenResponse {
     TokenResponse {
         id_token: bundle.id_token,
         access_token: bundle.access_token,
-        refresh_token: bundle.refresh_token,
+        scope: bundle.scope,
     }
 }
 
@@ -98,6 +108,14 @@ struct AccessTokenClaims {
     iat: u64,
     exp: u64,
     sub: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    azp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    given_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
 }
@@ -124,6 +142,10 @@ pub fn mint_system_access_token(
         iat,
         exp,
         sub: user.sub.clone(),
+        azp: None,
+        scope: None,
+        given_name: None,
+        name: None,
         extra,
     };
 
@@ -139,10 +161,6 @@ pub fn into_access_token_response(bundle: AccessTokenBundle) -> AccessTokenRespo
         access_token: bundle.access_token,
         expires_in: bundle.expires_in,
     }
-}
-
-fn random_token() -> String {
-    Alphanumeric.sample_string(&mut rand::thread_rng(), 32)
 }
 
 fn token_hash(token: &str) -> String {

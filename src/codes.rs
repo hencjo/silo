@@ -12,6 +12,7 @@ pub struct AuthorizationCode {
     pub client_id: String,
     pub redirect_uri: String,
     pub nonce: String,
+    pub scope: Option<String>,
     pub user: UserProfile,
     pub expires_at: SystemTime,
 }

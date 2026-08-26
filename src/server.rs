@@ -63,24 +63,83 @@ async fn authorize(State(state): State<Arc<AppState>>, raw_query: RawQuery) -> R
         return Err(AppError::bad_request("authorization_code flow is disabled"));
     }
 
-    let query = AuthorizationQuery::parse(raw_query.0.as_deref())?;
-
-    if query.response_type != "code" {
-        return Err(AppError::bad_request("response_type must be code"));
-    }
-    if !state.config.clients.contains_key(&query.client_id) {
+    let query = AuthorizationQuery::parse(raw_query.0.as_deref());
+    let client_id = query
+        .client_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::bad_request("missing query parameter: client_id"))?;
+    if !state.config.clients.contains_key(client_id) {
         return Err(AppError::unauthorized("unexpected client_id"));
     }
-    if query.state.is_empty() || query.redirect_uri.is_empty() || query.nonce.is_empty() {
-        return Err(AppError::bad_request(
-            "state, redirect_uri, and nonce are required",
-        ));
+
+    let redirect_uri = query
+        .redirect_uri
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::bad_request("missing query parameter: redirect_uri"))?;
+    let redirect = Url::parse(redirect_uri)
+        .map_err(|_| AppError::bad_request("redirect_uri must be an absolute URL"))?;
+
+    let response_type = match query
+        .response_type
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        Some(response_type) => response_type,
+        None => {
+            return authorization_error_redirect(
+                redirect,
+                query.state.as_deref(),
+                "invalid_request",
+                "missing query parameter: response_type",
+            )
+        }
+    };
+    if response_type != "code" {
+        return authorization_error_redirect(
+            redirect,
+            query.state.as_deref(),
+            "unsupported_response_type",
+            "response_type must be code",
+        );
     }
 
-    let user_hint = query.mock_user.as_deref().or(query.login_hint.as_deref());
-    let user = match state.resolve_user(user_hint)? {
-        Some(user) => user,
+    let state_value = match query.state.as_deref().filter(|value| !value.is_empty()) {
+        Some(state) => state,
         None => {
+            return authorization_error_redirect(
+                redirect,
+                query.state.as_deref(),
+                "invalid_request",
+                "missing query parameter: state",
+            )
+        }
+    };
+    let nonce = match query.nonce.as_deref().filter(|value| !value.is_empty()) {
+        Some(nonce) => nonce,
+        None => {
+            return authorization_error_redirect(
+                redirect,
+                query.state.as_deref(),
+                "invalid_request",
+                "missing query parameter: nonce",
+            )
+        }
+    };
+
+    let user_hint = query.mock_user.as_deref().or(query.login_hint.as_deref());
+    let user = match state.resolve_user(user_hint) {
+        Err(error) => {
+            return authorization_error_redirect(
+                redirect,
+                query.state.as_deref(),
+                "invalid_request",
+                &error.to_string(),
+            )
+        }
+        Ok(Some(user)) => user,
+        Ok(None) => {
             let html =
                 render_user_selection_page(&state, raw_query.0.as_deref().unwrap_or_default());
             return Ok((StatusCode::OK, Html(html)).into_response());
@@ -90,21 +149,44 @@ async fn authorize(State(state): State<Arc<AppState>>, raw_query: RawQuery) -> R
     let code = state
         .codes
         .issue(AuthorizationCode {
-            client_id: query.client_id,
-            redirect_uri: query.redirect_uri.clone(),
-            nonce: query.nonce,
+            client_id: client_id.to_string(),
+            redirect_uri: redirect_uri.to_string(),
+            nonce: nonce.to_string(),
+            scope: query.scope.clone(),
             user,
             expires_at: expiration_after(state.config.code_ttl_seconds),
         })
         .await;
 
-    let mut redirect = Url::parse(&query.redirect_uri)?;
+    let mut redirect = redirect;
     {
         let mut pairs = redirect.query_pairs_mut();
         pairs.append_pair("code", &code);
-        pairs.append_pair("state", &query.state);
+        pairs.append_pair("state", state_value);
     }
 
+    redirect_response(redirect)
+}
+
+fn authorization_error_redirect(
+    mut redirect: Url,
+    state: Option<&str>,
+    error: &str,
+    description: &str,
+) -> Result<Response> {
+    {
+        let mut pairs = redirect.query_pairs_mut();
+        pairs.append_pair("error", error);
+        pairs.append_pair("error_description", description);
+        if let Some(state) = state {
+            pairs.append_pair("state", state);
+        }
+    }
+
+    redirect_response(redirect)
+}
+
+fn redirect_response(redirect: Url) -> Result<Response> {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::LOCATION,
@@ -163,6 +245,7 @@ async fn authorization_code_token(state: Arc<AppState>, form: TokenForm) -> Resu
         &code.user,
         &client_id,
         Some(&code.nonce),
+        code.scope.as_deref(),
     )?;
 
     Ok(Json(jwt::into_token_response(bundle)).into_response())
@@ -407,9 +490,10 @@ mod tests {
 
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request, StatusCode};
-    use base64::engine::general_purpose::STANDARD;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use base64::Engine;
     use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+    use sha2::{Digest, Sha256};
     use tower::util::ServiceExt;
 
     use crate::app::AppState;
@@ -626,6 +710,135 @@ authorization_code: {}
     }
 
     #[tokio::test]
+    async fn redirects_authorization_errors_with_state() {
+        let app = test_app(Some("sub1")).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=token&client_id=relying-party&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Foauth%3Fexisting%3Dyes&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        let location = response
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let redirect = url::Url::parse(location).unwrap();
+        let query: std::collections::HashMap<_, _> = redirect.query_pairs().into_owned().collect();
+        assert_eq!(query.get("existing").map(String::as_str), Some("yes"));
+        assert_eq!(
+            query.get("error").map(String::as_str),
+            Some("unsupported_response_type")
+        );
+        assert_eq!(
+            query.get("error_description").map(String::as_str),
+            Some("response_type must be code")
+        );
+        assert_eq!(query.get("state").map(String::as_str), Some("test-state"));
+        assert!(!query.contains_key("code"));
+    }
+
+    #[tokio::test]
+    async fn redirects_missing_parameter_errors_after_valid_client_and_redirect() {
+        let app = test_app(Some("sub1")).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        let location = response
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let redirect = url::Url::parse(location).unwrap();
+        let query: std::collections::HashMap<_, _> = redirect.query_pairs().into_owned().collect();
+        assert_eq!(
+            query.get("error").map(String::as_str),
+            Some("invalid_request")
+        );
+        assert_eq!(
+            query.get("error_description").map(String::as_str),
+            Some("missing query parameter: nonce")
+        );
+        assert_eq!(query.get("state").map(String::as_str), Some("test-state"));
+    }
+
+    #[tokio::test]
+    async fn redirects_unknown_user_hint_errors() {
+        let app = test_app(None).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=relying-party&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state&login_hint=missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        let location = response
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let redirect = url::Url::parse(location).unwrap();
+        let query: std::collections::HashMap<_, _> = redirect.query_pairs().into_owned().collect();
+        assert_eq!(
+            query.get("error").map(String::as_str),
+            Some("invalid_request")
+        );
+        assert_eq!(
+            query.get("error_description").map(String::as_str),
+            Some("unknown configured sub: missing")
+        );
+    }
+
+    #[tokio::test]
+    async fn does_not_redirect_for_unknown_client_or_malformed_redirect_uri() {
+        let app = test_app(Some("sub1")).await;
+        let unknown_client = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=token&client_id=missing&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown_client.status(), StatusCode::UNAUTHORIZED);
+        assert!(unknown_client.headers().get("location").is_none());
+
+        let malformed_redirect = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=token&client_id=relying-party&redirect_uri=not-a-url&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(malformed_redirect.status(), StatusCode::BAD_REQUEST);
+        assert!(malformed_redirect.headers().get("location").is_none());
+    }
+
+    #[tokio::test]
     async fn returns_system_access_token_for_client_credentials() {
         let app = test_app(Some("sub2")).await;
         let response = app
@@ -766,6 +979,9 @@ authorization_code: {}
         let body = to_bytes(token.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let id_token = json["id_token"].as_str().unwrap();
+        let access_token = json["access_token"].as_str().unwrap();
+        assert_eq!(json["scope"], "custom_scope profile");
+        assert!(json.get("refresh_token").is_none());
 
         let header = decode_header(id_token).unwrap();
         assert_eq!(header.alg, Algorithm::RS256);
@@ -798,6 +1014,18 @@ authorization_code: {}
         assert_eq!(claims.claims["sub"], "sub2");
         assert_eq!(claims.claims["groups"][0], "auditor");
         assert_eq!(claims.claims["email"], "admin@example.com");
+        assert_eq!(claims.claims["at_hash"], token_hash(access_token));
+        assert!(claims.claims.get("rt_hash").is_none());
+
+        let access_claims =
+            decode::<serde_json::Value>(access_token, &decoding_key, &validation).unwrap();
+        assert_eq!(access_claims.claims["sub"], "sub2");
+        assert_eq!(access_claims.claims["azp"], "relying-party");
+        assert_eq!(access_claims.claims["scope"], "custom_scope profile");
+        assert_eq!(access_claims.claims["given_name"], "Admin");
+        assert_eq!(access_claims.claims["name"], "Admin User");
+        assert_eq!(access_claims.claims["groups"][0], "auditor");
+        assert_eq!(access_claims.claims["email"], "admin@example.com");
     }
 
     fn basic_authorization(client_id: &str) -> String {
@@ -805,5 +1033,10 @@ authorization_code: {}
             "Basic {}",
             STANDARD.encode(format!("{client_id}:client_secret").as_bytes())
         )
+    }
+
+    fn token_hash(token: &str) -> String {
+        let digest = Sha256::digest(token.as_bytes());
+        URL_SAFE_NO_PAD.encode(&digest[..digest.len() / 2])
     }
 }
