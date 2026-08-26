@@ -8,7 +8,6 @@ use crate::cli::ServeArgs;
 use crate::error::{AppError, Result};
 
 const CLIENT_SECRET: &str = "client_secret";
-const KEY_ID: &str = "kid-local-rsa-1";
 const TOKEN_TTL_SECONDS: i64 = 3600;
 const CODE_TTL_SECONDS: i64 = 300;
 
@@ -68,7 +67,7 @@ impl ResolvedConfig {
             issuer,
             issuer_path,
             scopes_supported: supported_scopes(&authorization_code_users, &parsed.clients),
-            key_file: default_ephemeral_key_file(),
+            key_file: parsed.key_file.unwrap_or_else(default_ephemeral_key_file),
             selected_sub,
             default_authorization_code_user,
             authorization_code_users,
@@ -102,10 +101,6 @@ impl ResolvedConfig {
     }
 }
 
-pub fn key_id() -> &'static str {
-    KEY_ID
-}
-
 pub fn example_config_yaml() -> &'static str {
     "# Example:
 #   silo example-config > config.yaml
@@ -117,7 +112,9 @@ pub fn example_config_yaml() -> &'static str {
 #   authorization_code.subs defines the selectable users for the browser flow.
 #   Set authorization_code: {} to disable the browser flow entirely.
 #   Each key under claims becomes a claim in the issued JWT.
+#   Set key_file to reuse one signing key across restarts or Silo instances.
 #
+# key_file: ./silo-private-key.pem
 clients:
   relying-party:
     client_secret: client_secret
@@ -175,6 +172,7 @@ fn issuer_path(raw: &str) -> Result<String> {
 #[derive(Debug, Deserialize)]
 struct ServeConfigFile {
     clients: BTreeMap<String, ClientConfig>,
+    key_file: Option<PathBuf>,
     #[serde(default)]
     authorization_code: AuthorizationCodeConfig,
 }
@@ -210,11 +208,21 @@ struct ClientConfig {
 struct ParsedConfigFile {
     authorization_code_users: Vec<UserProfile>,
     clients: BTreeMap<String, Client>,
+    key_file: Option<PathBuf>,
 }
 
 fn load_config_file(path: &Path) -> Result<ParsedConfigFile> {
     let raw = std::fs::read_to_string(path)?;
     let parsed: ServeConfigFile = serde_yaml::from_str(&raw)?;
+    let key_file = parsed.key_file.map(|key_file| {
+        if key_file.is_absolute() {
+            key_file
+        } else {
+            path.parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(key_file)
+        }
+    });
     let mut authorization_code_users = Vec::new();
 
     for (sub, entry) in parsed.authorization_code.subs {
@@ -257,6 +265,7 @@ fn load_config_file(path: &Path) -> Result<ParsedConfigFile> {
     Ok(ParsedConfigFile {
         authorization_code_users,
         clients,
+        key_file,
     })
 }
 
@@ -296,6 +305,7 @@ mod tests {
         assert!(yaml.contains("authorization_code:"));
         assert!(yaml.contains("relying-party:"));
         assert!(yaml.contains("system-api:"));
+        assert!(yaml.contains("# key_file: ./silo-private-key.pem"));
     }
 
     #[test]
@@ -376,5 +386,33 @@ authorization_code:
         assert_eq!(subs, ["zed", "alpha", "middle"]);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolves_relative_key_file_beside_config() {
+        let directory = std::env::temp_dir().join(format!("silo-config-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let config_file = directory.join("silo.yaml");
+        std::fs::write(
+            &config_file,
+            r#"
+key_file: keys/shared.pem
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code: {}
+"#,
+        )
+        .unwrap();
+
+        let config = ResolvedConfig::from_serve_args(ServeArgs {
+            port: 9393,
+            config_file,
+            sub: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.key_file, directory.join("keys/shared.pem"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

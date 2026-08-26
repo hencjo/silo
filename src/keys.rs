@@ -2,11 +2,11 @@ use std::path::Path;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
+use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::traits::PublicKeyParts;
 use rsa::{RsaPrivateKey, RsaPublicKey};
+use sha2::{Digest, Sha256};
 
-use crate::config;
 use crate::error::{AppError, Result};
 
 #[derive(Clone)]
@@ -64,19 +64,26 @@ pub async fn load_or_create(path: &Path) -> Result<SigningKeyMaterial> {
         Err(err) => return Err(err.into()),
     };
 
-    from_pem(config::key_id(), &pem)
+    from_pem(&pem)
 }
 
-fn from_pem(key_id: &str, pem: &str) -> Result<SigningKeyMaterial> {
+fn from_pem(pem: &str) -> Result<SigningKeyMaterial> {
     let private = RsaPrivateKey::from_pkcs8_pem(pem)?;
     let public = RsaPublicKey::from(&private);
     let encoding_key = jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes())?;
+    let key_id = key_id_from_public_key(&public)?;
 
     Ok(SigningKeyMaterial {
-        key_id: key_id.to_string(),
+        key_id: key_id.clone(),
         encoding_key,
-        jwk: jwk_from_public_key(key_id, &public),
+        jwk: jwk_from_public_key(&key_id, &public),
     })
+}
+
+fn key_id_from_public_key(public: &RsaPublicKey) -> Result<String> {
+    let der = public.to_public_key_der()?;
+    let digest = Sha256::digest(der.as_ref());
+    Ok(format!("sha256-{}", URL_SAFE_NO_PAD.encode(digest)))
 }
 
 fn generate_private_key() -> Result<RsaPrivateKey> {
@@ -92,5 +99,29 @@ fn jwk_from_public_key(key_id: &str, public: &RsaPublicKey) -> Jwk {
         alg: "RS256".to_string(),
         n: URL_SAFE_NO_PAD.encode(public.n().to_bytes_be()),
         e: URL_SAFE_NO_PAD.encode(public.e().to_bytes_be()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_or_create;
+
+    #[tokio::test]
+    async fn derives_stable_key_ids_from_reused_keys() {
+        let directory = std::env::temp_dir().join(format!("silo-keys-{}", uuid::Uuid::new_v4()));
+        let shared_path = directory.join("shared.pem");
+        let other_path = directory.join("other.pem");
+
+        let first = load_or_create(&shared_path).await.unwrap();
+        let reused = load_or_create(&shared_path).await.unwrap();
+        let other = load_or_create(&other_path).await.unwrap();
+
+        assert!(first.key_id.starts_with("sha256-"));
+        assert_eq!(first.key_id, reused.key_id);
+        assert_eq!(first.jwk.n, reused.jwk.n);
+        assert_ne!(first.key_id, other.key_id);
+        assert_ne!(first.jwk.n, other.jwk.n);
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

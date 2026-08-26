@@ -652,7 +652,6 @@ authorization_code: {}
         let access_token = json["access_token"].as_str().unwrap();
         let header = decode_header(access_token).unwrap();
         assert_eq!(header.alg, Algorithm::RS256);
-        assert_eq!(header.kid.as_deref(), Some(crate::config::key_id()));
 
         let jwks = app
             .oneshot(
@@ -666,6 +665,7 @@ authorization_code: {}
         let jwks_body = to_bytes(jwks.into_body(), usize::MAX).await.unwrap();
         let jwks_json: serde_json::Value = serde_json::from_slice(&jwks_body).unwrap();
         let key = &jwks_json["keys"][0];
+        assert_eq!(header.kid.as_deref(), key["kid"].as_str());
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
             key["e"].as_str().unwrap(),
@@ -769,7 +769,6 @@ authorization_code: {}
 
         let header = decode_header(id_token).unwrap();
         assert_eq!(header.alg, Algorithm::RS256);
-        assert_eq!(header.kid.as_deref(), Some(crate::config::key_id()));
 
         let jwks = app
             .oneshot(
@@ -783,6 +782,7 @@ authorization_code: {}
         let jwks_body = to_bytes(jwks.into_body(), usize::MAX).await.unwrap();
         let jwks_json: serde_json::Value = serde_json::from_slice(&jwks_body).unwrap();
         let key = &jwks_json["keys"][0];
+        assert_eq!(header.kid.as_deref(), key["kid"].as_str());
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
             key["e"].as_str().unwrap(),

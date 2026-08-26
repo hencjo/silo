@@ -17,7 +17,7 @@ Precedence:
 Behavior:
   --sub selects one configured user automatically for the browser authorization flow.
   Without --sub, the browser flow shows a user chooser page.
-  A temporary PEM file is created outside the project directory for each run.
+  A temporary signing key is created for each run unless config sets key_file.
   Any configured client_id may use any flow.
 
 Config file example:
