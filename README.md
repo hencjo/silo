@@ -99,6 +99,7 @@ authorization_code:
       givenName: Mock
       defaultName: Mock User
       claims:
+        preferred_username: mock
         groups:
           - admin
     sub2:
@@ -113,6 +114,7 @@ authorization_code:
 Notes:
 
 - `givenName` and `defaultName` are emitted in the ID token.
+- The user picker shows a non-empty string `claims.preferred_username` followed by the stable `sub`; otherwise it shows `sub` alone.
 - Each key under `claims` becomes a claim in issued JWTs, with the original YAML value preserved.
 - Without `key_file`, Silo creates a fresh temporary signing key for each run.
 - A missing configured `key_file` is generated once and then reused. Its `kid` is derived from the public key.

@@ -41,19 +41,19 @@ body = """
 {% if bug_fixes %}
 ### Bug Fixes
 {% for commit in bug_fixes %}
-- {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+- {{ commit.message | upper_first }}{% if commit.footers %}{% for footer in commit.footers %}{% if footer.token == "Upgrade" %} **Upgrade:** {{ footer.value }}{% endif %}{% endfor %}{% endif %}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
 {% endfor %}
 {% endif %}
 {% if improvements %}
 ### Improvements
 {% for commit in improvements %}
-- {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+- {{ commit.message | upper_first }}{% if commit.footers %}{% for footer in commit.footers %}{% if footer.token == "Upgrade" %} **Upgrade:** {{ footer.value }}{% endif %}{% endfor %}{% endif %}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
 {% endfor %}
 {% endif %}
 {% if breaking_changes %}
 ### Breaking Changes
 {% for commit in breaking_changes %}
-- **Breaking**: {{ commit.message | upper_first }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
+- **Breaking**: {{ commit.message | upper_first }}{% if commit.footers %}{% for footer in commit.footers %}{% if footer.token == "Upgrade" %} **Upgrade:** {{ footer.value }}{% endif %}{% endfor %}{% endif %}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}.
 {% endfor %}
 {% endif %}
 """

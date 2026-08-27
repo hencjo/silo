@@ -48,3 +48,4 @@ It's built and consumed as a nix flake (`flake.nix`, `flake.lock`).
 - **<Name>**: <Description>.
 ```
 
+Use release-plz-compatible Conventional Commits. Add an `Upgrade:` commit footer when users need upgrade guidance; release-plz includes it in the generated changelog. Let the release PR update versions and `CHANGELOG.md`.
