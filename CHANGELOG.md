@@ -12,6 +12,37 @@
 
 ### Breaking Changes
 
+### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
+## 2.0.0
+
+
+
+
+### Bug Fixes
+
+- Fix for building packages on release.
+
+- Hide sub when preferred_username is available **Upgrade:** No config change is required; users with claims.preferred_username now see only preferred_username in the picker.
+
+
+
+### Improvements
+
+- Release v1.0.2.
+
+- Support reusable signing keys.
+
+- Improve authorization-code fidelity.
+
+- Prefer preferred_username in user picker **Upgrade:** No config change is required; users with claims.preferred_username will now see preferred_username followed by the muted sub value.
+
+
+
 ## 1.0.2
 
 
