@@ -110,7 +110,7 @@ pub fn example_config_yaml() -> &'static str {
 #   clients maps OAuth client ids to their client_secret and optional client_credentials claims.
 #   All entries under clients are clients, and any client_id may use any flow.
 #   authorization_code.subs defines the selectable users for the browser flow.
-#   A claims.preferred_username is shown with the stable sub in the user picker.
+#   A claims.preferred_username is shown instead of sub in the user picker.
 #   Set authorization_code: {} to disable the browser flow entirely.
 #   Each key under claims becomes a claim in the issued JWT.
 #   Set key_file to reuse one signing key across restarts or Silo instances.

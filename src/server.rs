@@ -455,11 +455,7 @@ fn render_user_selection_page(state: &AppState, raw_query: &str) -> String {
                 .and_then(serde_json::Value::as_str)
                 .filter(|username| !username.trim().is_empty())
             {
-                Some(username) => format!(
-                    "{} <span class=\"subject\">({})</span>",
-                    escape_html(username),
-                    escape_html(&user.sub)
-                ),
+                Some(username) => escape_html(username),
                 None => escape_html(&user.sub),
             };
             format!(
@@ -473,7 +469,7 @@ fn render_user_selection_page(state: &AppState, raw_query: &str) -> String {
         .join("");
 
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>SILO: Silo is local OpenID</title><style>body{{margin:0;background:#111;color:#f5f5f5;font:16px/1.5 monospace}}main{{max-width:720px;margin:0 auto;padding:32px 20px}}section{{border:1px solid #444;background:#1a1a1a;padding:20px}}h1{{margin:0 0 8px;font-size:28px}}p{{margin:0 0 20px;color:#cfcfcf}}ul{{list-style:none;padding:0;margin:0;border-top:1px solid #333}}li{{border-bottom:1px solid #333}}a{{display:flex;justify-content:space-between;gap:16px;padding:14px 0;color:#fff;text-decoration:none}}a:hover,a:focus{{background:#222;outline:none}}.identity{{color:#fff}}.subject,.display-name{{color:#a3a3a3}}</style></head><body><main><section><h1>SILO: Silo is local OpenID</h1><p>Select a user to continue.</p><ul>{items}</ul></section></main><script>const items=[...document.querySelectorAll('a')];if(items.length)items[0].focus();document.addEventListener('keydown',e=>{{if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;const i=Math.max(items.indexOf(document.activeElement),0);const n=e.key==='ArrowDown'?Math.min(i+1,items.length-1):Math.max(i-1,0);items[n]?.focus();e.preventDefault();}});</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>SILO: Silo is local OpenID</title><style>body{{margin:0;background:#111;color:#f5f5f5;font:16px/1.5 monospace}}main{{max-width:720px;margin:0 auto;padding:32px 20px}}section{{border:1px solid #444;background:#1a1a1a;padding:20px}}h1{{margin:0 0 8px;font-size:28px}}p{{margin:0 0 20px;color:#cfcfcf}}ul{{list-style:none;padding:0;margin:0;border-top:1px solid #333}}li{{border-bottom:1px solid #333}}a{{display:flex;justify-content:space-between;gap:16px;padding:14px 0;color:#fff;text-decoration:none}}a:hover,a:focus{{background:#222;outline:none}}.identity{{color:#fff}}.display-name{{color:#a3a3a3}}</style></head><body><main><section><h1>SILO: Silo is local OpenID</h1><p>Select a user to continue.</p><ul>{items}</ul></section></main><script>const items=[...document.querySelectorAll('a')];if(items.length)items[0].focus();document.addEventListener('keydown',e=>{{if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;const i=Math.max(items.indexOf(document.activeElement),0);const n=e.key==='ArrowDown'?Math.min(i+1,items.length-1):Math.max(i-1,0);items[n]?.focus();e.preventDefault();}});</script></body></html>"
     )
 }
 
@@ -698,7 +694,7 @@ authorization_code:
     }
 
     #[tokio::test]
-    async fn presents_preferred_username_with_muted_subject() {
+    async fn presents_preferred_username_instead_of_subject() {
         let app = test_app_with_yaml(
             r#"
 clients:
@@ -743,12 +739,13 @@ authorization_code:
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("alice <span class=\"subject\">(sub1)</span>"));
+        assert!(html.contains(">alice</span> <span class=\"display-name\">Alice Example"));
+        assert!(!html.contains(">(sub1)</span>"));
         assert!(html.contains(">sub2</span> <span class=\"display-name\">Empty Username"));
         assert!(html.contains(">sub3</span> <span class=\"display-name\">Numeric Username"));
         assert!(html.contains("mock_user=subject%3C%26%22"));
         assert!(html.contains(
-            "username&lt;&amp;&quot; <span class=\"subject\">(subject&lt;&amp;&quot;)</span>"
+            ">username&lt;&amp;&quot;</span> <span class=\"display-name\">Display&lt;&amp;&quot;"
         ));
         assert!(html.contains("Display&lt;&amp;&quot;"));
         assert!(!html.contains("username<&\""));
