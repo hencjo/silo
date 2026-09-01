@@ -8,6 +8,29 @@
 
 ### Breaking Changes
 
+## 3.0.0
+
+
+
+
+### Bug Fixes
+
+- Improve remote HTTP error output.
+
+
+
+### Improvements
+
+- Add scoped client credentials **Upgrade:** Move machine clients to client_credentials.clients, nest claims under scopes.<scope>.claims, and pass scopes with --scope..
+
+
+
+### Bug Fixes
+
+### Improvements
+
+### Breaking Changes
+
 - **Client credentials configuration**: Added repeatable scope requests and moved serve-mode machine clients from `clients` to scope-gated entries under `client_credentials.clients`. Legacy `givenName`, `defaultName`, and `claims` fields under `clients` are now ignored. **Upgrade:** Move every machine client to `client_credentials.clients`, move its former `claims` under `scopes.<scope>.claims`, remove `givenName` and `defaultName`, and pass the required scope with `--scope`. Keep a copy under `clients` only when the same ID is also an authorization-code relying party.
 
 ## 2.0.0
