@@ -49,3 +49,5 @@ It's built and consumed as a nix flake (`flake.nix`, `flake.lock`).
 ```
 
 Use release-plz-compatible Conventional Commits. Add an `Upgrade:` commit footer when users need upgrade guidance; release-plz includes it in the generated changelog. Let the release PR update versions and `CHANGELOG.md`.
+
+Keep `README.md` limited to the current source and behavior. Put legacy, migration, upgrade, and historical notes in `CHANGELOG.md` instead.

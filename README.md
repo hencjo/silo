@@ -29,7 +29,8 @@ The code exchange returns signed ID and access tokens. Silo does not issue refre
 - configurable mock users from YAML
 - interactive user chooser for browser flow
 - optional `--sub` to preselect one mock user
-- `client_credentials` mode for fetching remote access tokens and printing them to stdout
+- `client_credentials` mode with repeatable scope requests for fetching remote access tokens
+- scope-gated mock claims for serve-mode `client_credentials` tokens
 
 ## Install or run with nix
 
@@ -47,7 +48,7 @@ nix run github:hencjo/silo -- serve --port 9799 --config-file config.yaml &
 In another shell:
 ```bash
 CLIENT_ID=system-api CLIENT_SECRET=client_secret \
-  nix run github:hencjo/silo -- client_credentials --issuer-url http://localhost:9799/Silo
+  nix run github:hencjo/silo -- client_credentials --issuer-url http://localhost:9799/Silo --scope api.read
 ```
 
 ## Quick Start
@@ -66,16 +67,18 @@ Fetch a local `client_credentials` token from the running server:
 
 ```bash
 CLIENT_ID=system-api CLIENT_SECRET=client_secret \
-  silo client_credentials --issuer-url http://localhost:9799/Silo
+  silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read
 ```
 
 ## Config
 
 The server reads a YAML file with:
 
-- `clients` for OAuth clients and optional `client_credentials` token claims
+- `clients` for authorization-code relying parties
+- `client_credentials.clients` for machine clients and their scope-gated token claims
 - `authorization_code.subs` for selectable browser-flow users
 - `authorization_code: {}` to disable the browser flow entirely
+- an omitted or empty `client_credentials` section to disable that flow
 - optional `key_file` for sharing one signing key across restarts or Silo instances
 
 Example:
@@ -86,13 +89,15 @@ Example:
 clients:
   relying-party:
     client_secret: client_secret
-  system-api:
-    client_secret: client_secret
-    givenName: System
-    defaultName: System API
-    claims:
-      groups:
-        - admin
+client_credentials:
+  clients:
+    system-api:
+      client_secret: client_secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - admin
 authorization_code:
   subs:
     sub1:
@@ -115,11 +120,13 @@ Notes:
 
 - `givenName` and `defaultName` are emitted in the ID token.
 - The user picker shows a non-empty string `claims.preferred_username`; otherwise it shows `sub`.
-- Each key under `claims` becomes a claim in issued JWTs, with the original YAML value preserved.
+- Each key under an authorization-code user's `claims` becomes an unconditional JWT claim.
+- For `client_credentials`, claims are emitted only when their containing scope is requested. Repeat `--scope` to request multiple scopes.
+- Unknown machine-client scopes and conflicting values for the same claim return `invalid_scope`.
+- A machine token requested without scopes remains valid and contains only protocol claims.
 - Without `key_file`, Silo creates a fresh temporary signing key for each run.
 - A missing configured `key_file` is generated once and then reused. Its `kid` is derived from the public key.
-- All entries under `clients` are OAuth clients, and any configured client can use either flow.
-- For `client_credentials`, `givenName`, `defaultName`, and `claims` are optional per client. If omitted, Silo still mints a valid token with `sub=<client_id>`.
+- Authorization-code and machine-client registries are separate; configure an ID in both places if it must use both flows.
 
 ## License
 

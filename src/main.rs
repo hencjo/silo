@@ -42,11 +42,20 @@ async fn run_server(args: cli::ServeArgs) -> Result<()> {
     if !config.authorization_code_enabled() {
         eprintln!("authorization_code flow is disabled");
     }
+    if !config.client_credentials_enabled() {
+        eprintln!("client_credentials flow is disabled");
+    }
     if let Some(client) = example_client {
+        let scope = client
+            .scopes
+            .keys()
+            .next()
+            .map(|scope| format!(" --scope {scope}"))
+            .unwrap_or_default();
         eprintln!("Run this in a terminal to test:");
         eprintln!(
-            "  CLIENT_ID={} CLIENT_SECRET={} silo client_credentials --issuer-url {}",
-            client.client_id, client.client_secret, config.issuer
+            "  CLIENT_ID={} CLIENT_SECRET={} silo client_credentials --issuer-url {}{}",
+            client.client_id, client.client_secret, config.issuer, scope
         );
     }
 

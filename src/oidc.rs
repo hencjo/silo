@@ -30,7 +30,7 @@ impl AuthorizationQuery {
         let mut redirect_uri = None;
         let mut nonce = None;
         let mut state = None;
-        let mut scopes = Vec::new();
+        let mut scope_values = Vec::new();
         let mut login_hint = None;
         let mut mock_user = None;
 
@@ -41,13 +41,7 @@ impl AuthorizationQuery {
                 "redirect_uri" => redirect_uri = Some(value.into_owned()),
                 "nonce" => nonce = Some(value.into_owned()),
                 "state" => state = Some(value.into_owned()),
-                "scope" => {
-                    for scope in value.split_ascii_whitespace() {
-                        if !scopes.iter().any(|existing| existing == scope) {
-                            scopes.push(scope.to_string());
-                        }
-                    }
-                }
+                "scope" => scope_values.push(value.into_owned()),
                 "login_hint" => login_hint = Some(value.into_owned()),
                 "mock_user" => mock_user = Some(value.into_owned()),
                 _ => {}
@@ -60,16 +54,33 @@ impl AuthorizationQuery {
             redirect_uri,
             nonce,
             state,
-            scope: (!scopes.is_empty()).then(|| scopes.join(" ")),
+            scope: normalize_scopes(scope_values),
             login_hint,
             mock_user,
         }
     }
 }
 
+pub fn normalize_scopes<I, S>(values: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut scopes = Vec::new();
+    for value in values {
+        for scope in value.as_ref().split_ascii_whitespace() {
+            if !scopes.iter().any(|existing| existing == scope) {
+                scopes.push(scope.to_string());
+            }
+        }
+    }
+    (!scopes.is_empty()).then(|| scopes.join(" "))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TokenForm {
     pub grant_type: String,
+    pub scope: Option<String>,
     pub redirect_uri: Option<String>,
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
@@ -88,11 +99,13 @@ pub struct TokenResponse {
 pub struct AccessTokenResponse {
     pub access_token: String,
     pub expires_in: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthorizationQuery, TokenResponse};
+    use super::{normalize_scopes, AuthorizationQuery, TokenResponse};
 
     #[test]
     fn combines_and_deduplicates_requested_scopes() {
@@ -117,5 +130,14 @@ mod tests {
         let json = serde_json::to_value(response).unwrap();
         assert!(json.get("scope").is_none());
         assert!(json.get("refresh_token").is_none());
+    }
+
+    #[test]
+    fn normalizes_scope_values_in_first_seen_order() {
+        assert_eq!(
+            normalize_scopes(["read write", "read admin"]),
+            Some("read write admin".to_string())
+        );
+        assert_eq!(normalize_scopes(["  "]), None);
     }
 }

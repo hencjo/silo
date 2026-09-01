@@ -5,7 +5,7 @@ const ROOT_ABOUT: &str =
 const ROOT_AFTER_HELP: &str = "\
 Examples:
   silo serve --port 9799 --config-file config.yaml
-  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo
+  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read
   silo example-config > config.yaml";
 
 const SERVE_AFTER_HELP: &str = "\
@@ -18,19 +18,22 @@ Behavior:
   --sub selects one configured user automatically for the browser authorization flow.
   Without --sub, the browser flow shows a user chooser page.
   A temporary signing key is created for each run unless config sets key_file.
-  Any configured client_id may use any flow.
+  clients defines authorization_code relying parties.
+  client_credentials.clients defines machine clients and scope-gated claims.
 
 Config file example:
   clients:
     relying-party:
       client_secret: client_secret
-    system-api:
-      client_secret: client_secret
-      givenName: System
-      defaultName: System API
-      claims:
-        groups:
-          - admin
+  client_credentials:
+    clients:
+      system-api:
+        client_secret: client_secret
+        scopes:
+          api.read:
+            claims:
+              groups:
+                - admin
   authorization_code:
     subs:
       sub1:
@@ -52,10 +55,11 @@ Environment:
   CLIENT_SECRET is read from the environment only.
 
 Silo serve mode:
-  client_id must match a configured client.
+  client_id must match a configured client_credentials client.
+  Repeat --scope to request multiple scopes.
 
 Example:
-  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo";
+  CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -106,5 +110,37 @@ pub struct ClientCredentialsArgs {
     pub client_id: String,
 
     #[arg(long)]
+    pub scope: Vec<String>,
+
+    #[arg(long)]
     pub insecure: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Commands};
+
+    #[test]
+    fn parses_repeated_client_credentials_scopes() {
+        let cli = Cli::try_parse_from([
+            "silo",
+            "client_credentials",
+            "--issuer-url",
+            "https://issuer.example",
+            "--client-id",
+            "system-api",
+            "--scope",
+            "api.read",
+            "--scope",
+            "api.write",
+        ])
+        .unwrap();
+
+        let Commands::ClientCredentials(args) = cli.command else {
+            panic!("expected client_credentials command");
+        };
+        assert_eq!(args.scope, ["api.read", "api.write"]);
+    }
 }

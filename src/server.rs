@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::extract::{RawQuery, State};
@@ -12,9 +13,10 @@ use url::Url;
 
 use crate::app::AppState;
 use crate::codes::{expiration_after, AuthorizationCode};
+use crate::config::ClientCredentialsClient;
 use crate::error::{AppError, Result};
 use crate::jwt;
-use crate::oidc::{AuthorizationQuery, DiscoveryDocument, TokenForm};
+use crate::oidc::{normalize_scopes, AuthorizationQuery, DiscoveryDocument, TokenForm};
 
 pub fn build_router(state: Arc<AppState>) -> Router {
     let issuer_path = state.config.issuer_path.clone();
@@ -43,9 +45,12 @@ fn route_path(prefix: &str, suffix: &str) -> String {
 }
 
 async fn discovery(State(state): State<Arc<AppState>>) -> Json<DiscoveryDocument> {
-    let mut grant_types_supported = vec!["client_credentials".to_string()];
+    let mut grant_types_supported = Vec::new();
     if state.config.authorization_code_enabled() {
-        grant_types_supported.insert(0, "authorization_code".to_string());
+        grant_types_supported.push("authorization_code".to_string());
+    }
+    if state.config.client_credentials_enabled() {
+        grant_types_supported.push("client_credentials".to_string());
     }
 
     Json(DiscoveryDocument {
@@ -218,6 +223,11 @@ async fn authorization_code_token(state: Arc<AppState>, form: TokenForm) -> Resu
     if !state.config.authorization_code_enabled() {
         return Err(AppError::bad_request("authorization_code flow is disabled"));
     }
+    if form.scope.is_some() {
+        return Err(AppError::bad_request(
+            "authorization_code token exchange does not accept a scope form field",
+        ));
+    }
 
     let client_id = required_form_field("client_id", form.client_id)?;
     let client_secret = required_form_field("client_secret", form.client_secret)?;
@@ -256,6 +266,10 @@ async fn client_credentials_token(
     headers: HeaderMap,
     form: TokenForm,
 ) -> Result<Response> {
+    if !state.config.client_credentials_enabled() {
+        return Err(AppError::bad_request("client_credentials flow is disabled"));
+    }
+
     let client_id = validate_basic_authorization(&headers, &state)?;
 
     if form.client_id.is_some()
@@ -277,7 +291,7 @@ async fn client_credentials_token(
 
     let machine_client = state
         .config
-        .clients
+        .client_credentials_clients
         .get(&client_id)
         .cloned()
         .ok_or_else(|| {
@@ -291,14 +305,53 @@ async fn client_credentials_token(
             AppError::unauthorized("unknown client_id")
         })?;
 
+    let scope = normalize_scopes(form.scope.iter());
+    let additional_claims =
+        match scoped_client_credentials_claims(&machine_client, scope.as_deref()) {
+            Ok(claims) => claims,
+            Err(reason) => {
+                log_client_credentials_failure(
+                    &state,
+                    StatusCode::BAD_REQUEST,
+                    &reason,
+                    Some(&client_id),
+                    None,
+                );
+                return Err(AppError::bad_request("invalid_scope"));
+            }
+        };
+
     let bundle = jwt::mint_system_access_token(
         &state.signing_key,
         &state.config,
-        &machine_client.profile,
         &client_id,
+        scope.as_deref(),
+        additional_claims,
     )?;
 
     Ok(Json(jwt::into_access_token_response(bundle)).into_response())
+}
+
+fn scoped_client_credentials_claims(
+    client: &ClientCredentialsClient,
+    scope: Option<&str>,
+) -> std::result::Result<BTreeMap<String, serde_json::Value>, String> {
+    let mut claims = BTreeMap::new();
+    for requested_scope in scope.into_iter().flat_map(str::split_ascii_whitespace) {
+        let Some(scope_claims) = client.scopes.get(requested_scope) else {
+            return Err(format!("unknown scope={requested_scope}"));
+        };
+        for (claim, value) in scope_claims {
+            if let Some(existing) = claims.get(claim) {
+                if existing != value {
+                    return Err(format!("conflicting claim={claim}"));
+                }
+            } else {
+                claims.insert(claim.clone(), value.clone());
+            }
+        }
+    }
+    Ok(claims)
 }
 
 fn required_form_field(name: &str, value: Option<String>) -> Result<String> {
@@ -373,7 +426,7 @@ fn validate_basic_authorization(headers: &HeaderMap, state: &AppState) -> Result
 
     let expected_secret = state
         .config
-        .clients
+        .client_credentials_clients
         .get(client_id)
         .map(|client| client.client_secret.as_str());
 
@@ -425,12 +478,12 @@ fn log_client_credentials_failure(
 }
 
 fn expected_client_credentials_hint(state: &AppState) -> String {
-    let client_ids = if state.config.clients.is_empty() {
+    let client_ids = if state.config.client_credentials_clients.is_empty() {
         "none".to_string()
     } else {
         state
             .config
-            .clients
+            .client_credentials_clients
             .keys()
             .cloned()
             .collect::<Vec<_>>()
@@ -515,13 +568,15 @@ mod tests {
 clients:
   relying-party:
     client_secret: client_secret
-  local-sub2:
-    client_secret: client_secret
-    givenName: Admin
-    defaultName: Admin User
-    claims:
-      groups:
-        - auditor
+client_credentials:
+  clients:
+    local-sub2:
+      client_secret: client_secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - auditor
 authorization_code:
   subs:
     sub1:
@@ -590,7 +645,7 @@ authorization_code:
         );
         assert_eq!(
             json["scopes_supported"],
-            serde_json::json!(["email", "groups", "openid", "profile"])
+            serde_json::json!(["api.read", "email", "groups", "openid", "profile"])
         );
         assert_eq!(
             json["grant_types_supported"],
@@ -605,6 +660,10 @@ authorization_code:
 clients:
   relying-party:
     client_secret: client_secret
+client_credentials:
+  clients:
+    system-api:
+      client_secret: client_secret
 authorization_code: {}
 "#,
             None,
@@ -626,6 +685,41 @@ authorization_code: {}
         assert_eq!(
             json["grant_types_supported"],
             serde_json::json!(["client_credentials"])
+        );
+    }
+
+    #[tokio::test]
+    async fn omits_client_credentials_from_discovery_when_disabled() {
+        let app = test_app_with_yaml(
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code:
+  subs:
+    sub1:
+      givenName: Mock
+      defaultName: Mock User
+"#,
+            None,
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/.well-known/openid-configuration")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["grant_types_supported"],
+            serde_json::json!(["authorization_code"])
         );
     }
 
@@ -777,6 +871,60 @@ authorization_code: {}
     }
 
     #[tokio::test]
+    async fn rejects_client_credentials_when_flow_is_disabled() {
+        let app = test_app_with_yaml(
+            r#"
+clients:
+  relying-party:
+    client_secret: client_secret
+authorization_code: {}
+"#,
+            None,
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from("grant_type=client_credentials"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "client_credentials flow is disabled");
+    }
+
+    #[tokio::test]
+    async fn rejects_scope_on_authorization_code_token_exchange() {
+        let app = test_app(Some("sub1")).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from("grant_type=authorization_code&scope=api.read"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["error"],
+            "authorization_code token exchange does not accept a scope form field"
+        );
+    }
+
+    #[tokio::test]
     async fn redirects_authorization_errors_with_state() {
         let app = test_app(Some("sub1")).await;
         let response = app
@@ -916,7 +1064,9 @@ authorization_code: {}
                     .uri("/Silo/oauth2/token")
                     .header("content-type", "application/x-www-form-urlencoded")
                     .header("authorization", basic_authorization("local-sub2"))
-                    .body(Body::from("grant_type=client_credentials"))
+                    .body(Body::from(
+                        "grant_type=client_credentials&scope=api.read%20api.read",
+                    ))
                     .unwrap(),
             )
             .await
@@ -928,6 +1078,7 @@ authorization_code: {}
         assert!(json.get("id_token").is_none());
         assert!(json.get("refresh_token").is_none());
         assert_eq!(json["expires_in"], 3600);
+        assert_eq!(json["scope"], "api.read");
 
         let access_token = json["access_token"].as_str().unwrap();
         let header = decode_header(access_token).unwrap();
@@ -958,8 +1109,161 @@ authorization_code: {}
 
         let claims = decode::<serde_json::Value>(access_token, &decoding_key, &validation).unwrap();
         assert_eq!(claims.claims["sub"], "local-sub2");
+        assert_eq!(claims.claims["scope"], "api.read");
         assert_eq!(claims.claims["groups"][0], "auditor");
         assert!(claims.claims.get("nonce").is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_base_client_credentials_token_without_scope() {
+        let app = test_app(Some("sub2")).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", basic_authorization("local-sub2"))
+                    .body(Body::from("grant_type=client_credentials"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.get("scope").is_none());
+        let claims = unverified_token_claims(json["access_token"].as_str().unwrap());
+        assert_eq!(claims["sub"], "local-sub2");
+        assert!(claims.get("scope").is_none());
+        assert!(claims.get("groups").is_none());
+    }
+
+    #[tokio::test]
+    async fn merges_compatible_scope_claims_and_rejects_conflicts() {
+        let app = test_app_with_yaml(
+            r#"
+client_credentials:
+  clients:
+    system-api:
+      client_secret: client_secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - reader
+            enabled: true
+        api.audit:
+          claims:
+            department: finance
+            enabled: true
+        api.write:
+          claims:
+            groups:
+              - writer
+authorization_code: {}
+"#,
+            None,
+        )
+        .await;
+
+        let compatible = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", basic_authorization("system-api"))
+                    .body(Body::from(
+                        "grant_type=client_credentials&scope=api.read%20api.audit",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(compatible.status(), StatusCode::OK);
+        let body = to_bytes(compatible.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["scope"], "api.read api.audit");
+        let claims = unverified_token_claims(json["access_token"].as_str().unwrap());
+        assert_eq!(claims["groups"], serde_json::json!(["reader"]));
+        assert_eq!(claims["department"], "finance");
+        assert_eq!(claims["enabled"], true);
+
+        let conflicting = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", basic_authorization("system-api"))
+                    .body(Body::from(
+                        "grant_type=client_credentials&scope=api.read%20api.write",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(conflicting.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(conflicting.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_scope");
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_client_credentials_scope() {
+        let app = test_app(Some("sub1")).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", basic_authorization("local-sub2"))
+                    .body(Body::from(
+                        "grant_type=client_credentials&scope=api.missing",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_scope");
+    }
+
+    #[tokio::test]
+    async fn keeps_authorization_code_and_machine_client_registries_separate() {
+        let app = test_app(Some("sub1")).await;
+        let client_credentials = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/Silo/oauth2/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", basic_authorization("relying-party"))
+                    .body(Body::from("grant_type=client_credentials"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(client_credentials.status(), StatusCode::UNAUTHORIZED);
+
+        let authorization_code = app
+            .oneshot(
+                Request::builder()
+                    .uri("/Silo/oauth2/authorize?response_type=code&client_id=local-sub2&redirect_uri=http://localhost:8080/oauth&nonce=test-nonce&state=test-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(authorization_code.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -1105,5 +1409,11 @@ authorization_code: {}
     fn token_hash(token: &str) -> String {
         let digest = Sha256::digest(token.as_bytes());
         URL_SAFE_NO_PAD.encode(&digest[..digest.len() / 2])
+    }
+
+    fn unverified_token_claims(token: &str) -> serde_json::Value {
+        let payload = token.split('.').nth(1).unwrap();
+        let decoded = URL_SAFE_NO_PAD.decode(payload).unwrap();
+        serde_json::from_slice(&decoded).unwrap()
     }
 }

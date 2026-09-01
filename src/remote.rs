@@ -4,6 +4,7 @@ use url::Url;
 
 use crate::cli::ClientCredentialsArgs;
 use crate::error::{AppError, Result};
+use crate::oidc::normalize_scopes;
 
 pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Result<String> {
     let client = http_client(args.insecure)?;
@@ -27,13 +28,18 @@ pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Resu
         &discovery_response,
     )?;
 
+    let mut token_form = vec![("grant_type", "client_credentials".to_string())];
+    if let Some(scope) = normalize_scopes(&args.scope) {
+        token_form.push(("scope", scope));
+    }
+
     let token_response = send_and_read_json(
         "token",
         "POST",
         client
             .post(&token_endpoint)
             .basic_auth(args.client_id, Some(client_secret))
-            .form(&[("grant_type", "client_credentials")]),
+            .form(&token_form),
         &token_endpoint,
     )
     .await?;
@@ -295,6 +301,8 @@ mod tests {
         routing::{get, post},
         Router,
     };
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use jsonwebtoken::{decode_header, Algorithm};
 
     use super::{body_preview, fetch_client_credentials_token, sanitized_url};
@@ -325,13 +333,15 @@ mod tests {
 clients:
   relying-party:
     client_secret: client_secret
-  local-sub1:
-    client_secret: client_secret
-    givenName: Mock
-    defaultName: Mock User
-    claims:
-      groups:
-        - admin
+client_credentials:
+  clients:
+    local-sub1:
+      client_secret: client_secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - admin
 authorization_code:
   subs:
     sub1:
@@ -369,6 +379,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url,
                 client_id: "local-sub1".to_string(),
+                scope: vec!["api.read".to_string()],
                 insecure: false,
             })
             .await
@@ -378,6 +389,12 @@ authorization_code:
 
         let header = decode_header(&token).unwrap();
         assert_eq!(header.alg, Algorithm::RS256);
+        let payload = URL_SAFE_NO_PAD
+            .decode(token.split('.').nth(1).unwrap())
+            .unwrap();
+        let claims: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(claims["scope"], "api.read");
+        assert_eq!(claims["groups"], serde_json::json!(["admin"]));
 
         handle.abort();
     }
@@ -398,6 +415,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
+                scope: Vec::new(),
                 insecure: false,
             })
             .await
@@ -441,6 +459,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
+                scope: Vec::new(),
                 insecure: false,
             })
             .await
@@ -484,6 +503,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
+                scope: Vec::new(),
                 insecure: false,
             })
             .await
@@ -527,6 +547,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
+                scope: Vec::new(),
                 insecure: false,
             })
             .await
@@ -576,6 +597,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
+                scope: Vec::new(),
                 insecure: false,
             })
             .await

@@ -23,6 +23,7 @@ pub struct TokenBundle {
 pub struct AccessTokenBundle {
     pub access_token: String,
     pub expires_in: u64,
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,8 +124,9 @@ struct AccessTokenClaims {
 pub fn mint_system_access_token(
     signing_key: &SigningKeyMaterial,
     config: &ResolvedConfig,
-    user: &UserProfile,
     client_id: &str,
+    scope: Option<&str>,
+    additional_claims: BTreeMap<String, serde_json::Value>,
 ) -> Result<AccessTokenBundle> {
     let now = SystemTime::now();
     let iat = unix_timestamp(now)?;
@@ -134,25 +136,24 @@ pub fn mint_system_access_token(
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(signing_key.key_id.clone());
 
-    let extra = user.additional_claims.clone();
-
     let claims = AccessTokenClaims {
         iss: config.issuer.clone(),
         aud: client_id.to_string(),
         iat,
         exp,
-        sub: user.sub.clone(),
+        sub: client_id.to_string(),
         azp: None,
-        scope: None,
+        scope: scope.map(ToOwned::to_owned),
         given_name: None,
         name: None,
-        extra,
+        extra: additional_claims,
     };
 
     let access_token = jsonwebtoken::encode(&header, &claims, &signing_key.encoding_key)?;
     Ok(AccessTokenBundle {
         access_token,
         expires_in,
+        scope: scope.map(ToOwned::to_owned),
     })
 }
 
@@ -160,6 +161,7 @@ pub fn into_access_token_response(bundle: AccessTokenBundle) -> AccessTokenRespo
     AccessTokenResponse {
         access_token: bundle.access_token,
         expires_in: bundle.expires_in,
+        scope: bundle.scope,
     }
 }
 

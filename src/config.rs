@@ -21,10 +21,14 @@ pub struct UserProfile {
 
 #[derive(Debug, Clone)]
 pub struct Client {
+    pub client_secret: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientCredentialsClient {
     pub client_id: String,
     pub client_secret: String,
-    pub profile: UserProfile,
-    pub explicit_client_credentials_profile: bool,
+    pub scopes: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +42,7 @@ pub struct ResolvedConfig {
     pub default_authorization_code_user: Option<UserProfile>,
     pub authorization_code_users: Vec<UserProfile>,
     pub clients: BTreeMap<String, Client>,
+    pub client_credentials_clients: BTreeMap<String, ClientCredentialsClient>,
     pub token_ttl_seconds: i64,
     pub code_ttl_seconds: i64,
 }
@@ -66,12 +71,16 @@ impl ResolvedConfig {
             listen: SocketAddr::from(([127, 0, 0, 1], args.port)),
             issuer,
             issuer_path,
-            scopes_supported: supported_scopes(&authorization_code_users, &parsed.clients),
+            scopes_supported: supported_scopes(
+                &authorization_code_users,
+                &parsed.client_credentials_clients,
+            ),
             key_file: parsed.key_file.unwrap_or_else(default_ephemeral_key_file),
             selected_sub,
             default_authorization_code_user,
             authorization_code_users,
             clients: parsed.clients,
+            client_credentials_clients: parsed.client_credentials_clients,
             token_ttl_seconds: TOKEN_TTL_SECONDS,
             code_ttl_seconds: CODE_TTL_SECONDS,
         })
@@ -89,15 +98,16 @@ impl ResolvedConfig {
         format!("{}{}", self.issuer, "/jwks.json")
     }
 
-    pub fn example_client_credentials_client(&self) -> Option<&Client> {
-        self.clients
-            .values()
-            .find(|client| client.explicit_client_credentials_profile)
-            .or_else(|| self.clients.values().next())
+    pub fn example_client_credentials_client(&self) -> Option<&ClientCredentialsClient> {
+        self.client_credentials_clients.values().next()
     }
 
     pub fn authorization_code_enabled(&self) -> bool {
         !self.authorization_code_users.is_empty()
+    }
+
+    pub fn client_credentials_enabled(&self) -> bool {
+        !self.client_credentials_clients.is_empty()
     }
 }
 
@@ -107,25 +117,28 @@ pub fn example_config_yaml() -> &'static str {
 #   silo serve --port 9799 --config-file config.yaml
 #
 # Structure:
-#   clients maps OAuth client ids to their client_secret and optional client_credentials claims.
-#   All entries under clients are clients, and any client_id may use any flow.
+#   clients defines relying parties for the authorization_code flow.
+#   client_credentials.clients defines machine clients and their scope-gated claims.
 #   authorization_code.subs defines the selectable users for the browser flow.
 #   A claims.preferred_username is shown instead of sub in the user picker.
 #   Set authorization_code: {} to disable the browser flow entirely.
-#   Each key under claims becomes a claim in the issued JWT.
+#   Omit client_credentials or leave its clients empty to disable that flow.
+#   Each key under a requested client_credentials scope's claims becomes a JWT claim.
 #   Set key_file to reuse one signing key across restarts or Silo instances.
 #
 # key_file: ./silo-private-key.pem
 clients:
   relying-party:
     client_secret: client_secret
-  system-api:
-    client_secret: client_secret
-    givenName: System
-    defaultName: System API
-    claims:
-      groups:
-        - admin
+client_credentials:
+  clients:
+    system-api:
+      client_secret: client_secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - admin
 authorization_code:
   subs:
     sub1:
@@ -173,10 +186,13 @@ fn issuer_path(raw: &str) -> Result<String> {
 
 #[derive(Debug, Deserialize)]
 struct ServeConfigFile {
+    #[serde(default)]
     clients: BTreeMap<String, ClientConfig>,
     key_file: Option<PathBuf>,
     #[serde(default)]
     authorization_code: AuthorizationCodeConfig,
+    #[serde(default)]
+    client_credentials: ClientCredentialsConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -199,10 +215,24 @@ struct ServeSubConfig {
 struct ClientConfig {
     #[serde(default = "default_client_secret")]
     client_secret: String,
-    #[serde(rename = "givenName")]
-    given_name: Option<String>,
-    #[serde(rename = "defaultName")]
-    name: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ClientCredentialsConfig {
+    #[serde(default)]
+    clients: BTreeMap<String, ClientCredentialsClientConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClientCredentialsClientConfig {
+    #[serde(default = "default_client_secret")]
+    client_secret: String,
+    #[serde(default)]
+    scopes: BTreeMap<String, ClientCredentialsScopeConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ClientCredentialsScopeConfig {
     #[serde(default)]
     claims: BTreeMap<String, serde_json::Value>,
 }
@@ -210,6 +240,7 @@ struct ClientConfig {
 struct ParsedConfigFile {
     authorization_code_users: Vec<UserProfile>,
     clients: BTreeMap<String, Client>,
+    client_credentials_clients: BTreeMap<String, ClientCredentialsClient>,
     key_file: Option<PathBuf>,
 }
 
@@ -242,38 +273,50 @@ fn load_config_file(path: &Path) -> Result<ParsedConfigFile> {
         });
     }
 
-    let mut clients = BTreeMap::new();
-    for (client_id, entry) in parsed.clients {
-        let explicit_profile =
-            entry.given_name.is_some() || entry.name.is_some() || !entry.claims.is_empty();
-        let given_name = entry.given_name.unwrap_or_else(|| client_id.clone());
-        let name = entry.name.unwrap_or_else(|| client_id.clone());
-        clients.insert(
-            client_id.clone(),
-            Client {
-                client_id: client_id.clone(),
-                client_secret: entry.client_secret,
-                profile: UserProfile {
-                    sub: client_id,
-                    given_name,
-                    name,
-                    additional_claims: entry.claims,
+    let clients = parsed
+        .clients
+        .into_iter()
+        .map(|(client_id, entry)| {
+            (
+                client_id,
+                Client {
+                    client_secret: entry.client_secret,
                 },
-                explicit_client_credentials_profile: explicit_profile,
-            },
-        );
-    }
+            )
+        })
+        .collect();
+    let client_credentials_clients = parsed
+        .client_credentials
+        .clients
+        .into_iter()
+        .map(|(client_id, entry)| {
+            let scopes = entry
+                .scopes
+                .into_iter()
+                .map(|(scope, entry)| (scope, entry.claims))
+                .collect();
+            (
+                client_id.clone(),
+                ClientCredentialsClient {
+                    client_id,
+                    client_secret: entry.client_secret,
+                    scopes,
+                },
+            )
+        })
+        .collect();
 
     Ok(ParsedConfigFile {
         authorization_code_users,
         clients,
+        client_credentials_clients,
         key_file,
     })
 }
 
 fn supported_scopes(
     authorization_code_users: &[UserProfile],
-    clients: &BTreeMap<String, Client>,
+    client_credentials_clients: &BTreeMap<String, ClientCredentialsClient>,
 ) -> Vec<String> {
     let mut scopes = BTreeSet::from(["openid".to_string(), "profile".to_string()]);
     for user in authorization_code_users {
@@ -281,10 +324,8 @@ fn supported_scopes(
             scopes.insert(scope.clone());
         }
     }
-    for client in clients.values() {
-        for scope in client.profile.additional_claims.keys() {
-            scopes.insert(scope.clone());
-        }
+    for client in client_credentials_clients.values() {
+        scopes.extend(client.scopes.keys().cloned());
     }
     scopes.into_iter().collect()
 }
@@ -304,6 +345,8 @@ mod tests {
         assert!(yaml.starts_with("# Example:"));
         assert!(yaml.contains("silo example-config > config.yaml"));
         assert!(yaml.contains("clients:"));
+        assert!(yaml.contains("client_credentials:"));
+        assert!(yaml.contains("api.read:"));
         assert!(yaml.contains("authorization_code:"));
         assert!(yaml.contains("relying-party:"));
         assert!(yaml.contains("system-api:"));
@@ -352,6 +395,63 @@ authorization_code:
         );
         assert_eq!(user.additional_claims.get("enabled"), Some(&json!(true)));
         assert_eq!(user.additional_claims.get("level"), Some(&json!(7)));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn parses_scope_gated_client_credentials_claims() {
+        let path = std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+client_credentials:
+  clients:
+    system-api:
+      client_secret: secret
+      scopes:
+        api.read:
+          claims:
+            groups:
+              - reader
+            enabled: true
+authorization_code: {}
+"#,
+        )
+        .unwrap();
+
+        let parsed = load_config_file(&path).unwrap();
+        assert!(parsed.clients.is_empty());
+        let client = parsed.client_credentials_clients.get("system-api").unwrap();
+        assert_eq!(client.client_secret, "secret");
+        assert_eq!(client.scopes["api.read"]["groups"], json!(["reader"]));
+        assert_eq!(client.scopes["api.read"]["enabled"], json!(true));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ignores_legacy_machine_profile_fields_under_authorization_clients() {
+        let path = std::env::temp_dir().join(format!("silo-config-{}.yaml", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+clients:
+  old-machine:
+    client_secret: secret
+    givenName: Legacy
+    defaultName: Legacy Machine
+    claims:
+      groups:
+        - admin
+authorization_code: {}
+"#,
+        )
+        .unwrap();
+
+        let parsed = load_config_file(&path).unwrap();
+        assert!(parsed.clients.contains_key("old-machine"));
+        assert!(parsed.client_credentials_clients.is_empty());
 
         let _ = std::fs::remove_file(path);
     }
