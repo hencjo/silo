@@ -19,7 +19,14 @@ use error::Result;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("{}", format_cli_error(&error));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     init_tracing();
 
     let cli = Cli::parse();
@@ -29,6 +36,10 @@ async fn main() -> Result<()> {
         Commands::ClientCredentials(args) => run_client_credentials(args).await,
         Commands::ExampleConfig => run_example_config(),
     }
+}
+
+fn format_cli_error(error: &error::AppError) -> String {
+    format!("Error: {error}")
 }
 
 async fn run_server(args: cli::ServeArgs) -> Result<()> {
@@ -103,5 +114,21 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_cli_error;
+    use crate::error::AppError;
+
+    #[test]
+    fn formats_cli_errors_without_debug_wrapper_or_string_escaping() {
+        let error = AppError::bad_request(r#"response body={"error":"invalid_scope"}"#);
+
+        assert_eq!(
+            format_cli_error(&error),
+            r#"Error: response body={"error":"invalid_scope"}"#
+        );
     }
 }

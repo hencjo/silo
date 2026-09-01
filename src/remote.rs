@@ -15,9 +15,8 @@ pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Resu
 
     let discovery_response = send_and_read_json(
         "discovery",
-        "GET",
         client.get(&discovery_url),
-        &discovery_url,
+        RemoteRequestDiagnostic::get(discovery_url.clone()),
     )
     .await?;
     let discovery_json = parse_json_response("discovery", &discovery_response)?;
@@ -32,15 +31,18 @@ pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Resu
     if let Some(scope) = normalize_scopes(&args.scope) {
         token_form.push(("scope", scope));
     }
+    let token_request = RemoteRequestDiagnostic::client_credentials_form(
+        token_endpoint.clone(),
+        encode_form(&token_form),
+    );
 
     let token_response = send_and_read_json(
         "token",
-        "POST",
         client
             .post(&token_endpoint)
             .basic_auth(args.client_id, Some(client_secret))
             .form(&token_form),
-        &token_endpoint,
+        token_request,
     )
     .await?;
     let token_json = parse_json_response("token", &token_response)?;
@@ -63,9 +65,8 @@ fn normalize_issuer_url(raw: &str) -> String {
 
 async fn send_and_read_json(
     context: &str,
-    method: &str,
     request: RequestBuilder,
-    requested_url: &str,
+    request_diagnostic: RemoteRequestDiagnostic,
 ) -> Result<RemoteResponse> {
     let response = request.send().await?;
     let status = response.status();
@@ -75,7 +76,6 @@ async fn send_and_read_json(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    trace_response(method, requested_url, status);
     let body = response.text().await?;
     let remote_response = RemoteResponse {
         status,
@@ -86,12 +86,22 @@ async fn send_and_read_json(
 
     if !status.is_success() {
         return Err(AppError::bad_request(format!(
-            "remote {context} request failed with status {status}{}",
-            remote_response.diagnostic()
+            "remote {context} request failed{}",
+            request_diagnostic.exchange(&remote_response)
         )));
     }
 
+    trace_response(request_diagnostic.method, &request_diagnostic.url, status);
+
     Ok(remote_response)
+}
+
+fn encode_form(form: &[(&str, String)]) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in form {
+        serializer.append_pair(key, value);
+    }
+    serializer.finish()
 }
 
 fn parse_json_response(context: &str, response: &RemoteResponse) -> Result<Value> {
@@ -147,6 +157,61 @@ struct RemoteResponse {
     body: String,
 }
 
+struct RemoteRequestDiagnostic {
+    method: &'static str,
+    url: String,
+    authorization_scheme: Option<&'static str>,
+    content_type: Option<&'static str>,
+    body: Option<String>,
+}
+
+impl RemoteRequestDiagnostic {
+    fn get(url: String) -> Self {
+        Self {
+            method: "GET",
+            url,
+            authorization_scheme: None,
+            content_type: None,
+            body: None,
+        }
+    }
+
+    fn client_credentials_form(url: String, body: String) -> Self {
+        Self {
+            method: "POST",
+            url,
+            authorization_scheme: Some("Basic"),
+            content_type: Some("application/x-www-form-urlencoded"),
+            body: Some(body),
+        }
+    }
+
+    fn exchange(&self, response: &RemoteResponse) -> String {
+        let mut output = format!(
+            "\n\n> {} {}",
+            self.method,
+            sanitized_url(&response.final_url)
+        );
+        if let Some(scheme) = self.authorization_scheme {
+            output.push_str(&format!("\n> Authorization: {scheme} <redacted>"));
+        }
+        if let Some(content_type) = self.content_type {
+            output.push_str(&format!("\n> Content-Type: {content_type}"));
+        }
+        if let Some(body) = self.body.as_deref() {
+            output.push_str("\n>\n> ");
+            output.push_str(body);
+        }
+        output.push_str(&format!(
+            "\n< {}\n< Content-Type: {}\n<\n{}",
+            response.status,
+            response.content_type.as_deref().unwrap_or("<missing>"),
+            body_preview(&response.body),
+        ));
+        output
+    }
+}
+
 impl RemoteResponse {
     fn diagnostic(&self) -> String {
         format!(
@@ -173,7 +238,7 @@ fn body_preview(body: &str) -> String {
     if body.chars().nth(MAX_PREVIEW_CHARS).is_some() {
         preview.push('…');
     }
-    format!("{preview:?}")
+    preview
 }
 
 fn redact_json_secrets(body: &str) -> Option<String> {
@@ -558,7 +623,7 @@ authorization_code:
 
         assert!(error.contains("remote token response was not valid JSON"));
         assert!(error.contains("status=200 OK, content-type=text/html"));
-        assert!(error.contains("body=\"<h1>Gateway login</h1>\""));
+        assert!(error.contains("body=<h1>Gateway login</h1>"));
 
         handle.abort();
     }
@@ -568,27 +633,26 @@ authorization_code:
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let token_endpoint = format!("http://localhost:{}/issuer/oauth2/token", addr.port());
-        let app =
-            Router::new()
-                .route(
-                    "/issuer/.well-known/openid-configuration",
-                    get(move || {
-                        let token_endpoint = token_endpoint.clone();
-                        async move {
-                            axum::Json(serde_json::json!({ "token_endpoint": token_endpoint }))
-                        }
-                    }),
-                )
-                .route(
-                    "/issuer/oauth2/token",
-                    post(|| async {
-                        (
-                            StatusCode::BAD_GATEWAY,
-                            [(CONTENT_TYPE, "text/plain")],
-                            "identity gateway is unavailable",
-                        )
-                    }),
-                );
+        let app = Router::new()
+            .route(
+                "/issuer/.well-known/openid-configuration",
+                get(move || {
+                    let token_endpoint = token_endpoint.clone();
+                    async move {
+                        axum::Json(serde_json::json!({ "token_endpoint": token_endpoint }))
+                    }
+                }),
+            )
+            .route(
+                "/issuer/oauth2/token",
+                post(|| async {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        [(CONTENT_TYPE, "application/json")],
+                        r#"{"error":"invalid_scope","error_description":"Invalid scopes: app00004109_groups"}"#,
+                    )
+                }),
+            );
         let handle = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -597,7 +661,7 @@ authorization_code:
             fetch_client_credentials_token(ClientCredentialsArgs {
                 issuer_url: format!("http://localhost:{}/issuer", addr.port()),
                 client_id: "client_id".to_string(),
-                scope: Vec::new(),
+                scope: vec!["app00004109_groups".to_string()],
                 insecure: false,
             })
             .await
@@ -606,9 +670,24 @@ authorization_code:
         .await
         .to_string();
 
-        assert!(error.contains("request failed with status 502 Bad Gateway"));
-        assert!(error.contains("content-type=text/plain"));
-        assert!(error.contains("body=\"identity gateway is unavailable\""));
+        assert_eq!(
+            error,
+            format!(
+                "remote token request failed\n\n\
+> POST http://localhost:{}/issuer/oauth2/token\n\
+> Authorization: Basic <redacted>\n\
+> Content-Type: application/x-www-form-urlencoded\n\
+>\n\
+> grant_type=client_credentials&scope=app00004109_groups\n\
+< 400 Bad Request\n\
+< Content-Type: application/json\n\
+<\n\
+{{\"error\":\"invalid_scope\",\"error_description\":\"Invalid scopes: app00004109_groups\"}}",
+                addr.port()
+            )
+        );
+        assert!(!error.contains("client_id"));
+        assert!(!error.contains("client_secret"));
 
         handle.abort();
     }
@@ -635,8 +714,9 @@ authorization_code:
         let preview = body_preview(r#"{"access_token":"token","nested":{"password":"secret"}}"#);
 
         assert_eq!(sanitized_url(&url), "https://issuer.example/token");
+        assert!(preview.starts_with('{'));
         assert!(preview.contains("<redacted>"));
         assert!(!preview.contains("secret"));
-        assert!(!preview.contains("token\""));
+        assert!(!preview.contains(r#""token""#));
     }
 }
