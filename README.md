@@ -8,6 +8,7 @@ It is aimed at local development and test scenarios where you need:
 
 - a browser-based OpenID authorization code flow
 - a JWKS endpoint for JWT validation
+- an interactive `authorization_code` client for browser login against a real issuer
 - a simple `client_credentials` client for fetching tokens from Silo or a real issuer
 
 ## Browser flow
@@ -29,6 +30,7 @@ The code exchange returns signed ID and access tokens. Silo does not issue refre
 - configurable mock users from YAML
 - interactive user chooser for browser flow
 - optional `--sub` to preselect one mock user
+- `authorization_code` mode for fetching a remote access token through browser login
 - `client_credentials` mode with repeatable scope requests for fetching remote access tokens
 - scope-gated mock claims for serve-mode `client_credentials` tokens
 
@@ -69,6 +71,26 @@ Fetch a local `client_credentials` token from the running server:
 CLIENT_ID=system-api CLIENT_SECRET=client_secret \
   silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read
 ```
+
+## Remote authorization-code login
+
+Use `authorization_code` to log in through a real issuer and print its access token:
+
+```bash
+CLIENT_ID=relying-party CLIENT_SECRET=client_secret \
+  silo authorization_code \
+  --issuer-url https://idp.example \
+  --scope openid --scope profile
+```
+
+Silo uses the first free port from `8787` through `8887` and prints the resulting
+`http://localhost:<port>/callback` redirect URI to stderr on startup so it can be whitelisted with
+the issuer. It listens for one callback, opens the authorization URL in the default browser,
+exchanges the code using `client_secret_post`, and prints only the access token to stdout. The URL
+is also printed to stderr; pass `--no-browser` to open it yourself.
+
+If no scopes are supplied, Silo requests `openid`. `CLIENT_SECRET` is accepted from the environment
+only. Use `--insecure` only for a development issuer with an untrusted TLS certificate.
 
 ## Config
 

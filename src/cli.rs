@@ -1,10 +1,11 @@
 use clap::{Args, Parser, Subcommand};
 
 const ROOT_ABOUT: &str =
-    "SILO: Silo is local OpenID. Local OpenID mock backend with a browser login flow and a remote client_credentials mode.";
+    "SILO: Silo is local OpenID. Local OpenID mock backend with remote authorization_code and client_credentials helpers.";
 const ROOT_AFTER_HELP: &str = "\
 Examples:
   silo serve --port 9799 --config-file config.yaml
+  CLIENT_ID=relying-party CLIENT_SECRET=client_secret silo authorization_code --issuer-url https://idp.example
   CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read
   silo example-config > config.yaml";
 
@@ -61,6 +62,19 @@ Silo serve mode:
 Example:
   CLIENT_ID=system-api CLIENT_SECRET=client_secret silo client_credentials --issuer-url http://localhost:9799/Silo --scope api.read";
 
+const AUTHORIZATION_CODE_AFTER_HELP: &str = "\
+Environment:
+  ISSUER_URL and CLIENT_ID can come from env or be overridden by CLI options.
+  CLIENT_SECRET is read from the environment only.
+
+Behavior:
+  Silo uses the first free callback port in 8787-8887 and prints the redirect URI on startup.
+  Without --scope, Silo requests openid. Repeat --scope to request multiple scopes.
+  The authorization URL is always printed. Use --no-browser to skip opening it automatically.
+
+Example:
+  CLIENT_ID=relying-party CLIENT_SECRET=client_secret silo authorization_code --issuer-url https://idp.example --scope openid --scope profile";
+
 #[derive(Debug, Parser)]
 #[command(
     name = "silo",
@@ -79,6 +93,12 @@ pub struct Cli {
 pub enum Commands {
     #[command(about = "Run the mock OpenID server", after_help = SERVE_AFTER_HELP)]
     Serve(ServeArgs),
+    #[command(
+        name = "authorization_code",
+        about = "Log in through a remote authorization code flow and print its access token",
+        after_help = AUTHORIZATION_CODE_AFTER_HELP
+    )]
+    AuthorizationCode(AuthorizationCodeArgs),
     #[command(
         name = "client_credentials",
         about = "Request a remote client_credentials access token and print it",
@@ -116,6 +136,24 @@ pub struct ClientCredentialsArgs {
     pub insecure: bool,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct AuthorizationCodeArgs {
+    #[arg(long, env = "ISSUER_URL")]
+    pub issuer_url: String,
+
+    #[arg(long, env = "CLIENT_ID")]
+    pub client_id: String,
+
+    #[arg(long)]
+    pub scope: Vec<String>,
+
+    #[arg(long)]
+    pub insecure: bool,
+
+    #[arg(long)]
+    pub no_browser: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -142,5 +180,48 @@ mod tests {
             panic!("expected client_credentials command");
         };
         assert_eq!(args.scope, ["api.read", "api.write"]);
+    }
+
+    #[test]
+    fn parses_authorization_code_options() {
+        let cli = Cli::try_parse_from([
+            "silo",
+            "authorization_code",
+            "--issuer-url",
+            "https://issuer.example",
+            "--client-id",
+            "relying-party",
+            "--scope",
+            "openid",
+            "--scope",
+            "profile",
+            "--no-browser",
+        ])
+        .unwrap();
+
+        let Commands::AuthorizationCode(args) = cli.command else {
+            panic!("expected authorization_code command");
+        };
+        assert_eq!(args.scope, ["openid", "profile"]);
+        assert!(args.no_browser);
+    }
+
+    #[test]
+    fn rejects_authorization_code_redirect_uri_option() {
+        let error = Cli::try_parse_from([
+            "silo",
+            "authorization_code",
+            "--issuer-url",
+            "https://issuer.example",
+            "--client-id",
+            "relying-party",
+            "--redirect-uri",
+            "http://localhost:9999/callback",
+        ])
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("unexpected argument '--redirect-uri'"));
     }
 }

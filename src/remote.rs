@@ -6,6 +6,12 @@ use crate::cli::ClientCredentialsArgs;
 use crate::error::{AppError, Result};
 use crate::oidc::normalize_scopes;
 
+pub(crate) struct AuthorizationCodeProvider {
+    pub authorization_endpoint: String,
+    token_endpoint: String,
+    client: Client,
+}
+
 pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Result<String> {
     let client = http_client(args.insecure)?;
     let issuer_url = normalize_issuer_url(&args.issuer_url);
@@ -51,6 +57,60 @@ pub async fn fetch_client_credentials_token(args: ClientCredentialsArgs) -> Resu
     required_u64_field("token", "expires_in", &token_json, &token_response)?;
 
     Ok(access_token)
+}
+
+pub(crate) async fn discover_authorization_code_provider(
+    issuer_url: &str,
+    insecure: bool,
+) -> Result<AuthorizationCodeProvider> {
+    let client = http_client(insecure)?;
+    let issuer_url = normalize_issuer_url(issuer_url);
+    let discovery_url = format!("{issuer_url}/.well-known/openid-configuration");
+    let response = send_and_read_json(
+        "discovery",
+        client.get(&discovery_url),
+        RemoteRequestDiagnostic::get(discovery_url),
+    )
+    .await?;
+    let json = parse_json_response("discovery", &response)?;
+    let authorization_endpoint =
+        required_string_field("discovery", "authorization_endpoint", &json, &response)?;
+    let token_endpoint = required_string_field("discovery", "token_endpoint", &json, &response)?;
+
+    Ok(AuthorizationCodeProvider {
+        authorization_endpoint,
+        token_endpoint,
+        client,
+    })
+}
+
+pub(crate) async fn exchange_authorization_code(
+    provider: &AuthorizationCodeProvider,
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+    code: &str,
+) -> Result<String> {
+    let form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("client_id", client_id.to_string()),
+        ("client_secret", client_secret.to_string()),
+        ("redirect_uri", redirect_uri.to_string()),
+        ("code", code.to_string()),
+    ];
+    let diagnostic = RemoteRequestDiagnostic::form(
+        provider.token_endpoint.clone(),
+        encode_redacted_form(&form),
+        None,
+    );
+    let response = send_and_read_json(
+        "token",
+        provider.client.post(&provider.token_endpoint).form(&form),
+        diagnostic,
+    )
+    .await?;
+    let json = parse_json_response("token", &response)?;
+    required_string_field("token", "access_token", &json, &response)
 }
 
 fn http_client(insecure: bool) -> Result<Client> {
@@ -102,6 +162,28 @@ fn encode_form(form: &[(&str, String)]) -> String {
         serializer.append_pair(key, value);
     }
     serializer.finish()
+}
+
+fn encode_redacted_form(form: &[(&str, String)]) -> String {
+    let redacted: Vec<_> = form
+        .iter()
+        .map(|(key, value)| {
+            let value = if is_request_secret_key(key) {
+                "<redacted>".to_string()
+            } else {
+                value.clone()
+            };
+            (*key, value)
+        })
+        .collect();
+    encode_form(&redacted).replace("%3Credacted%3E", "<redacted>")
+}
+
+fn is_request_secret_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "client_secret" | "code" | "code_verifier" | "password" | "token"
+    )
 }
 
 fn parse_json_response(context: &str, response: &RemoteResponse) -> Result<Value> {
@@ -177,10 +259,14 @@ impl RemoteRequestDiagnostic {
     }
 
     fn client_credentials_form(url: String, body: String) -> Self {
+        Self::form(url, body, Some("Basic"))
+    }
+
+    fn form(url: String, body: String, authorization_scheme: Option<&'static str>) -> Self {
         Self {
             method: "POST",
             url,
-            authorization_scheme: Some("Basic"),
+            authorization_scheme,
             content_type: Some("application/x-www-form-urlencoded"),
             body: Some(body),
         }
@@ -370,7 +456,9 @@ mod tests {
     use base64::Engine;
     use jsonwebtoken::{decode_header, Algorithm};
 
-    use super::{body_preview, fetch_client_credentials_token, sanitized_url};
+    use super::{
+        body_preview, encode_redacted_form, fetch_client_credentials_token, sanitized_url,
+    };
     use crate::app::AppState;
     use crate::cli::{ClientCredentialsArgs, ServeArgs};
     use crate::config::ResolvedConfig;
@@ -718,5 +806,22 @@ authorization_code:
         assert!(preview.contains("<redacted>"));
         assert!(!preview.contains("secret"));
         assert!(!preview.contains(r#""token""#));
+    }
+
+    #[test]
+    fn authorization_code_form_diagnostic_redacts_credentials() {
+        let form = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("client_id", "visible-client".to_string()),
+            ("client_secret", "very-secret".to_string()),
+            ("code", "one-time-code".to_string()),
+        ];
+
+        let diagnostic = encode_redacted_form(&form);
+
+        assert!(diagnostic.contains("client_id=visible-client"));
+        assert!(!diagnostic.contains("very-secret"));
+        assert!(!diagnostic.contains("one-time-code"));
+        assert_eq!(diagnostic.matches("<redacted>").count(), 2);
     }
 }

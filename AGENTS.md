@@ -23,9 +23,13 @@ It is aimed at local development and test scenarios where you need:
 
 - a browser-based OpenID authorization code flow
 - a JWKS endpoint for JWT validation
+- an interactive `authorization_code` client for browser login against a real issuer
 - a simple `client_credentials` client for fetching tokens from Silo or a real issuer
 
 It's built and consumed as a nix flake (`flake.nix`, `flake.lock`).
+
+Keep `README.md` aligned with the current source. Put legacy and upgrade notes in release-plz
+commit footers rather than the README.
 
 ## Changelog
 

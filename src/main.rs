@@ -1,4 +1,5 @@
 mod app;
+mod authorization_code;
 mod cli;
 mod codes;
 mod config;
@@ -33,9 +34,16 @@ async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Serve(args) => run_server(args).await,
+        Commands::AuthorizationCode(args) => run_authorization_code(args).await,
         Commands::ClientCredentials(args) => run_client_credentials(args).await,
         Commands::ExampleConfig => run_example_config(),
     }
+}
+
+async fn run_authorization_code(args: cli::AuthorizationCodeArgs) -> Result<()> {
+    let token = authorization_code::fetch_access_token(args).await?;
+    println!("{token}");
+    Ok(())
 }
 
 fn format_cli_error(error: &error::AppError) -> String {
