@@ -42,7 +42,9 @@ pub async fn fetch_access_token(args: AuthorizationCodeArgs) -> Result<String> {
     let client_secret = std::env::var("CLIENT_SECRET")
         .map_err(|_| AppError::bad_request("missing CLIENT_SECRET environment variable"))?;
     fetch_access_token_with(args, &client_secret, CALLBACK_TIMEOUT, move |url| {
-        eprintln!("Open this URL to log in:\n{url}");
+        if !non_interactive {
+            eprintln!("Open this URL to log in:\n{url}");
+        }
         if !no_browser && !non_interactive {
             let url = url.to_string();
             std::thread::spawn(move || {

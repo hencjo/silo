@@ -86,8 +86,9 @@ CLIENT_ID=relying-party CLIENT_SECRET=client_secret \
 Silo uses the first free port from `8787` through `8887` and prints the resulting
 `http://localhost:<port>/callback` redirect URI to stderr on startup so it can be whitelisted with
 the issuer. It listens for one callback, opens the authorization URL in the default browser,
-exchanges the code using `client_secret_post`, and prints only the access token to stdout. The URL
-is also printed to stderr; pass `--no-browser` to open it yourself.
+exchanges the code using `client_secret_post`, and prints only the access token to stdout. In
+interactive mode, the authorization URL is also printed to stderr; pass `--no-browser` to open it
+yourself.
 
 If no scopes are supplied, Silo requests `openid`. `CLIENT_SECRET` is accepted from the environment
 only. Use `--insecure` only for a development issuer with an untrusted TLS certificate.

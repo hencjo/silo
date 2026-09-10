@@ -70,7 +70,7 @@ Environment:
 Behavior:
   Silo uses the first free callback port in 8787-8887 and prints the redirect URI on startup.
   Without --scope, Silo requests openid. Repeat --scope to request multiple scopes.
-  The authorization URL is always printed. Use --no-browser to skip opening it automatically.
+  Interactive mode prints the authorization URL. Use --no-browser to skip opening it automatically.
   Use --non-interactive against a local Silo issuer; --sub selects its mock user.
   --non-interactive conflicts with --no-browser, and --sub requires --non-interactive.
 
