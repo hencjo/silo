@@ -71,6 +71,8 @@ Behavior:
   Silo uses the first free callback port in 8787-8887 and prints the redirect URI on startup.
   Without --scope, Silo requests openid. Repeat --scope to request multiple scopes.
   The authorization URL is always printed. Use --no-browser to skip opening it automatically.
+  Use --non-interactive against a local Silo issuer; --sub selects its mock user.
+  --non-interactive conflicts with --no-browser, and --sub requires --non-interactive.
 
 Example:
   CLIENT_ID=relying-party CLIENT_SECRET=client_secret silo authorization_code --issuer-url https://idp.example --scope openid --scope profile";
@@ -152,6 +154,12 @@ pub struct AuthorizationCodeArgs {
 
     #[arg(long)]
     pub no_browser: bool,
+
+    #[arg(long, conflicts_with = "no_browser")]
+    pub non_interactive: bool,
+
+    #[arg(long, requires = "non_interactive")]
+    pub sub: Option<String>,
 }
 
 #[cfg(test)]
@@ -204,6 +212,63 @@ mod tests {
         };
         assert_eq!(args.scope, ["openid", "profile"]);
         assert!(args.no_browser);
+        assert!(!args.non_interactive);
+    }
+
+    #[test]
+    fn parses_non_interactive_authorization_code_sub() {
+        let cli = Cli::try_parse_from([
+            "silo",
+            "authorization_code",
+            "--issuer-url",
+            "http://localhost:9799/Silo",
+            "--client-id",
+            "relying-party",
+            "--non-interactive",
+            "--sub",
+            "sub2",
+        ])
+        .unwrap();
+
+        let Commands::AuthorizationCode(args) = cli.command else {
+            panic!("expected authorization_code command");
+        };
+        assert!(args.non_interactive);
+        assert_eq!(args.sub.as_deref(), Some("sub2"));
+    }
+
+    #[test]
+    fn rejects_sub_without_non_interactive_mode() {
+        let error = Cli::try_parse_from([
+            "silo",
+            "authorization_code",
+            "--issuer-url",
+            "http://localhost:9799/Silo",
+            "--client-id",
+            "relying-party",
+            "--sub",
+            "sub2",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("--non-interactive"));
+    }
+
+    #[test]
+    fn rejects_non_interactive_with_no_browser() {
+        let error = Cli::try_parse_from([
+            "silo",
+            "authorization_code",
+            "--issuer-url",
+            "http://localhost:9799/Silo",
+            "--client-id",
+            "relying-party",
+            "--non-interactive",
+            "--no-browser",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot be used with"));
     }
 
     #[test]

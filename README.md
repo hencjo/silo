@@ -92,6 +92,18 @@ is also printed to stderr; pass `--no-browser` to open it yourself.
 If no scopes are supplied, Silo requests `openid`. `CLIENT_SECRET` is accepted from the environment
 only. Use `--insecure` only for a development issuer with an untrusted TLS certificate.
 
+For headless tests against a locally running Silo, select a configured user directly:
+
+```bash
+CLIENT_ID=relying-party CLIENT_SECRET=client_secret \
+  silo authorization_code \
+  --issuer-url http://localhost:9799/Silo \
+  --non-interactive --sub sub1
+```
+
+Headless mode accepts loopback issuers only. `--sub` is optional when the server was already
+started with `silo serve --sub`; otherwise Silo returns the user chooser and the command fails.
+
 ## Config
 
 The server reads a YAML file with:

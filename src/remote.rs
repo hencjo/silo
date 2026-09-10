@@ -8,7 +8,7 @@ use crate::oidc::normalize_scopes;
 
 pub(crate) struct AuthorizationCodeProvider {
     pub authorization_endpoint: String,
-    token_endpoint: String,
+    pub token_endpoint: String,
     client: Client,
 }
 
